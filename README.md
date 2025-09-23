@@ -1,13 +1,13 @@
 # Lore: An LWE-based Key Encapsulation Mechanism with Variable Modulus and CRT Compression
 
-This repository contains the complete implementation and analysis tools for the **Lore** Key Encapsulation Mechanism (KEM). Lore is an IND-CCA2-secure post-quantum cryptographic scheme based on the Learning With Errors (LWE) problem, as detailed in the accompanying paper, `Lwe_SummaCrypt-2.pdf`.
+This repository contains the complete implementation and analysis tools for the **Lore** Key Encapsulation Mechanism (KEM).
 
 The scheme introduces two primary innovations to effectively balance security, communication bandwidth, and the Decryption Failure Rate (DFR):
 
-1.  **Variable Modulus**: The scheme utilizes a composite modulus $t \cdot q$. [cite_start]The parameter $t$ is varied across different security levels to achieve a DFR consistent with the targeted security strength, while $q$ is fixed to allow for efficient Number Theoretic Transform (NTT) operations[cite: 78, 267].
-2.  [cite_start]**CRT Compression**: It leverages the Chinese Remainder Theorem (CRT) to compress public keys and ciphertexts[cite: 52, 93, 275]. [cite_start]This technique, inspired by Learning with Rounding (LWR), reduces bandwidth by only storing part of the CRT representation and treating the resulting difference as cryptographic noise[cite: 233, 277].
+1.  **Variable Modulus**: The scheme utilizes a composite modulus $t \cdot q$. The parameter $t$ is varied across different security levels to achieve a DFR consistent with the targeted security strength, while $q$ is fixed to allow for efficient Number Theoretic Transform (NTT) operations.
+2.  **CRT Compression**: It leverages the Chinese Remainder Theorem (CRT) to compress public keys and ciphertexts. This technique, inspired by Learning with Rounding (LWR), reduces bandwidth by only storing part of the CRT representation and treating the resulting difference as cryptographic noise.
 
-[cite_start]Secret keys in Lore are sampled from a **fixed-weight distribution** to further minimize the DFR and improve computational performance[cite: 249, 525].
+Secret keys in Lore are sampled from a **fixed-weight distribution** to further minimize the DFR and improve computational performance.
 
 This repository includes:
 * A C reference implementation of the Lore KEM.
@@ -60,28 +60,33 @@ The `Lore/Security estimation/` directory contains Python scripts for a thorough
 
 ### Security Estimation
 
-The `Lore_security/` subdirectory contains a lattice security estimator based on SageMath. [cite_start]It can be used to evaluate the scheme's hardness against the best-known primal and dual lattice attacks, as discussed in the paper[cite: 510].
+The `Lore_security/` subdirectory contains a lattice security estimator based on SageMath. It can be used to evaluate the scheme's hardness against the best-known primal and dual lattice attacks.
 
-**Example Usage (`my-lwe-tests/test_my_params_crt1.py`):**
-This script assesses the security of the defined Lore parameter sets. You can run it within a SageMath environment:
+**Example Usage:**
+These scripts assess the security of the defined Lore parameter sets. You can run them within a SageMath environment:
 
 ```bash
 # Ensure you are in the Lore/Security estimation/Lore_security/ directory
+
+# For 128-bit security level parameters:
 sage ./my-lwe-tests/test_my_params_crt1.py
+
+# For 192-bit and 256-bit security level parameters:
+sage ./my-lwe-tests/test_my_params_crt2-r.py
 ```
 
-The script will output the estimated classical and quantum security levels in bits for each parameter set.
+The scripts will output the estimated classical and quantum security levels in bits for each parameter set.
 
 ### DFR Calculation
 
 The `Lore_failure/` subdirectory contains a script to compute the scheme's Decryption Failure Rate.
 
-**Example Usage (`Lore_failure/Lore_failure_crt_e-2.py`):**
+**Example Usage (`Lore_failure_crt_e.py`):**
 This script calculates the probability of a single coefficient failing decryption and aggregates it to determine the total DFR of the scheme.
 
 ```bash
 # Ensure you are in the Lore/Security estimation/ directory
-python ./Lore_failure/Lore_failure_crt_e-2.py
+python ./Lore_failure/Lore_failure_crt_e.py
 ```
 
 ## Citation
