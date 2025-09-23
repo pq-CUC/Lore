@@ -31,7 +31,11 @@ Located in `Lore/Reference implementation/ref/`, this is a full C implementation
 
 ### Compilation
 
-The project uses a `Makefile` that defines different compilation flags for each security level (`-DLORE_LEVEL=1`, `-DLORE_LEVEL=2`, `-DLORE_LEVEL=3`). To compile all test programs, run:
+The project uses a `Makefile` that defines different compilation flags for each security level (`-DLORE_LEVEL=1`, `-DLORE_LEVEL=2`, `-DLORE_LEVEL=3`).
+
+**Compiling All Levels**
+
+To compile all test programs for all security levels, run:
 
 ```bash
 cd "Lore/Reference implementation/ref"
@@ -42,6 +46,20 @@ This will generate the following executables:
 * `test_lore_1`, `test_lore_2`, `test_lore_3`
 * `test_speed_1`, `test_speed_2`, `test_speed_3`
 * `PQCgenKAT_pke_1`, `PQCgenKAT_pke_2`, `PQCgenKAT_pke_3`
+
+**Compiling a Specific Level**
+
+The `Makefile` is configured with separate targets for each program and level. To compile a specific program, simply specify its name. For example:
+
+To compile only the functionality test for Level 1 (128-bit security):
+```bash
+make test_lore_1
+```
+
+To compile only the speed test for Level 2 (192-bit security):
+```bash
+make test_speed_2
+```
 
 ### Usage
 
