@@ -1,20 +1,18 @@
 # Lore: An LWE-based Cryptosystem with Variable Modulus and CRT Compression
 
-This repository contains the complete implementation and analysis tools for the **Lore** cryptosystem, as presented in the paper `Lwe_SummaCrypt-3.pdf`.
+This repository contains the complete implementation and analysis tools for the **Lore** cryptosystem.
 
 The scheme introduces two primary innovations to effectively balance security, communication bandwidth, and the Decryption Failure Rate (DFR):
 
 1.  **Variable Modulus**: The scheme utilizes a composite modulus $t \cdot q$. The parameter $t$ is varied across different security levels to achieve a DFR consistent with the targeted security strength, while $q$ is fixed to allow for efficient Number Theoretic Transform (NTT) operations.
 2.  **CRT Compression**: It leverages the Chinese Remainder Theorem (CRT) to compress public keys and ciphertexts. This technique, inspired by Learning with Rounding (LWR), reduces bandwidth by only storing part of the CRT representation and treating the resulting difference as cryptographic noise.
 
-Secret keys in Lore are sampled from a **fixed-weight distribution**. The implementation employs a unified sampling strategy, where the total count of coefficients for each possible value (e.g., -2, -1, 0, 1, 2) is fixed across all *k* polynomials that constitute a secret vector. This approach helps to minimize the DFR and improve performance.
+Secret keys in Lore are sampled from a **fixed-weight distribution** to further minimize the DFR and improve computational performance.
 
 This repository includes:
 * A C reference implementation of the Lore scheme.
 * Python-based tools for security estimation against known lattice attacks.
 * Python scripts for analyzing the Decryption Failure Rate (DFR).
-
-The official repository can be found at: https://github.com/pq-CUC/Lore
 
 ## Directory Structure
 
