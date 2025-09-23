@@ -1,6 +1,6 @@
-# Lore: An LWE-based Key Encapsulation Mechanism with Variable Modulus and CRT Compression
+# Lore: An LWE-based Cryptosystem with Variable Modulus and CRT Compression
 
-This repository contains the complete implementation and analysis tools for the **Lore** Key Encapsulation Mechanism (KEM).
+This repository contains the complete implementation and analysis tools for the **Lore** cryptosystem.
 
 The scheme introduces two primary innovations to effectively balance security, communication bandwidth, and the Decryption Failure Rate (DFR):
 
@@ -10,7 +10,7 @@ The scheme introduces two primary innovations to effectively balance security, c
 Secret keys in Lore are sampled from a **fixed-weight distribution** to further minimize the DFR and improve computational performance.
 
 This repository includes:
-* A C reference implementation of the Lore KEM.
+* A C reference implementation of the Lore scheme.
 * Python-based tools for security estimation against known lattice attacks.
 * Python scripts for analyzing the Decryption Failure Rate (DFR).
 
@@ -27,7 +27,7 @@ This repository includes:
 
 ## 1. C Reference Implementation
 
-Located in `Lore/Reference implementation/ref/`, this is a full C implementation of the Lore KEM, supporting three security levels (128-bit, 192-bit, and 256-bit) as defined in the paper.
+Located in `Lore/Reference implementation/ref/`, this is a full C implementation of the Lore scheme, supporting three security levels (128-bit, 192-bit, and 256-bit) as defined in the paper.
 
 ### Compilation
 
@@ -45,8 +45,8 @@ This will generate the following executables:
 
 ### Usage
 
-* **Functionality Test**: Run `./test_lore_1` to verify the correctness of key generation, encapsulation, and decapsulation for the 128-bit security level.
-* **Performance Benchmark**: Run `./test_speed_1` to measure the cycle counts for the scheme's core operations.
+* **Functionality Test**: Run `./test_lore_1` to verify the correctness of key generation, encryption, and decryption.
+* **Performance Benchmark**: Run `./test_speed_1` to measure the cycle counts for the scheme's core cryptographic operations.
 * **Known Answer Tests (KAT)**: Run `./PQCgenKAT_pke_1` to generate KAT files, which are useful for ensuring compliance and correctness.
 
 To clean up the build artifacts, run:
