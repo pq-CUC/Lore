@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-selfcheck.json
+*.egg-info/
+.ipynb_checkpoints
+
+# C/C++
+*.o
+*.out
+*.exe
+*.so
+*.dll
+*.a
+*.lib
+
+# Build directories
+build/
+dist/
+
+# Other
+.DS_Store
