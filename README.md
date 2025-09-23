@@ -35,7 +35,7 @@ The project uses a `Makefile` that defines different compilation flags for each 
 
 **Compiling All Levels**
 
-To compile all test programs for all security levels, run:
+To compile all test programs for all security levels, run：
 
 ```bash
 cd "Lore/Reference implementation/ref"
