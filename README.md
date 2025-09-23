@@ -1,4 +1,4 @@
-# Lore: An LWE-based Cryptosystem with Variable Modulus and CRT Compression
+# Lore: An LWE-based Key Encapsulation Mechanism with Variable Modulus and CRT Compression
 
 This repository contains the complete implementation and analysis tools for the **Lore** cryptosystem.
 
