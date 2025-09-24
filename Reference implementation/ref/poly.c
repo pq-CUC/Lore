@@ -565,11 +565,14 @@ void poly_decode_msg_crt(unsigned char *msg, const poly_crt *r_crt) {
 * - const unsigned char *msg: pointer to the input message
 **************************************************/
 void poly_encode_msg(poly *r, const unsigned char *msg) {
+    // Calculate the encoding value based on the paper's formula (tq-1)/2
+    const int32_t val = (LORE_T * LORE_Q - 1) / 2;
+
     for (int i = 0; i < LORE_N / 8; ++i) {
         for (int j = 0; j < 8; ++j) {
             uint16_t mask = 1 << j;
             if (msg[i] & mask) {
-                r->coeffs[8*i+j] = LORE_Q / 2;
+                r->coeffs[8*i+j] = (int16_t)val;
             } else {
                 r->coeffs[8*i+j] = 0;
             }
@@ -608,17 +611,46 @@ void poly_decode_msg(unsigned char *msg, const poly *r) {
 /*************************************************
 * Name:        poly_add_scaled_msg
 *
-* Description: Adds a scaled message to a CRT polynomial.
+* Description: Adds a message to a CRT polynomial. (Optimized version)
 *
 * Arguments:   - poly_crt *r:          pointer to the CRT polynomial
 * - const poly *msg_poly: pointer to the message polynomial
 **************************************************/
 void poly_add_scaled_msg(poly_crt *r, const poly *msg_poly) {
     for(int i = 0; i < LORE_N; ++i) {
-        int32_t scaled_msg = (int32_t)LORE_T * msg_poly->coeffs[i];
-        r->q_poly.coeffs[i] = barrett_reduce((int16_t)(r->q_poly.coeffs[i] + scaled_msg));
+        // --- q-part addition (unchanged) ---
+        r->q_poly.coeffs[i] = barrett_reduce(r->q_poly.coeffs[i] + msg_poly->coeffs[i]);
+
+        // --- t-part addition (now highly optimized) ---
+        int16_t t_msg_coeff = msg_poly->coeffs[i] % LORE_T;
+        int32_t t_sum = r->t_poly.coeffs[i] + t_msg_coeff; // Use int32_t for sum
+
+#if LORE_LEVEL == 1 || LORE_LEVEL == 2
+        // For t=3 and t=7, use the extremely fast lookup table.
+        // The LORE_MOD_T_SPARSE macro handles both modulo and centering.
+        r->t_poly.coeffs[i] = LORE_MOD_T_SPARSE(t_sum);
+
+#else // LORE_LEVEL == 3 (t=13)
+        // For t=13, use the highly optimized Barrett-like reduction
+        // adapted from poly_sparse_mul_modt function.
+
+        // Pre-calculated "magic number" M = floor(2^35 / 13)
+        const int64_t M = 2643056797;
+
+        // a * M >> 35 is an excellent approximation of a / 13
+        int32_t q = (int32_t)(((int64_t)t_sum * M) >> 35);
+        int16_t reduced_val = (int16_t)(t_sum - q * 13);
+
+        // Correction step 1: Ensure remainder is in the range [0, 12]
+        if (reduced_val >= 13) reduced_val -= 13;
+        if (reduced_val < 0) reduced_val += 13;
+
+        // Correction step 2: Center the result to [-6, 6]
+        if (reduced_val > 6) reduced_val -= 13;
+
+        r->t_poly.coeffs[i] = reduced_val;
+#endif
     }
-    // t_poly part remains unchanged as t*msg mod t = 0
 }
 
 /*************************************************
