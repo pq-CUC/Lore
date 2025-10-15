@@ -95,8 +95,8 @@ randombytes_init(unsigned char *entropy_input,
     reseed_counter = 1;
 }
 
-int
-randombytes(unsigned char *x, unsigned long long xlen)
+void
+randombytes(uint8_t *x, size_t xlen)
 {
     unsigned char   block[16];
     int             i = 0;
@@ -123,8 +123,6 @@ randombytes(unsigned char *x, unsigned long long xlen)
         }
     }
     reseed_counter++;
-
-    return 1;
 }
 
 // ** Key fix: Add a deterministic implementation of randombytes_uniform **

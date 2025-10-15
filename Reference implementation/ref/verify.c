@@ -21,7 +21,7 @@ int verify(const uint8_t *a, const uint8_t *b, size_t len)
   for(i=0;i<len;i++)
     r |= a[i] ^ b[i];
 
-  return (-(uint64_t)r) >> 63;
+  return (int)((-(uint64_t)r) >> 63);
 }
 
 /*************************************************
@@ -71,5 +71,5 @@ void cmov(uint8_t *r, const uint8_t *x, size_t len, uint8_t b)
 void cmov_int16(int16_t *r, int16_t v, uint16_t b)
 {
   b = -b;
-  *r ^= b & ((*r) ^ v);
+  *r ^= (int16_t)(b & ((*r) ^ v));
 }

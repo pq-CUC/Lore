@@ -24,10 +24,10 @@ VPATH = .:test:kat
 # ==============================================================================
 
 # Core library source files
-SOURCES_BASE = pke.c indcpa.c polyvec.c poly.c ntt.c sampler.c reduce.c \
-               symmetric-shake.c fips202.c toomcook.c
+SOURCES_BASE = kem.c pke.c indcpa.c polyvec.c poly.c ntt.c sampler.c reduce.c \
+               symmetric-shake.c fips202.c toomcook.c verify.c
 
-# Random number source files
+# Random number source files (distinguished by purpose)
 SOURCES_RANDOM_REAL = randombytes.c
 SOURCES_RANDOM_KAT = rng.c
 
@@ -40,7 +40,7 @@ SOURCES_KAT_MAIN = PQCgenKAT_pke.c
 # ===================      Object File Lists (per level)      ====================
 # ==============================================================================
 
-# Generate separate object file lists for each level, e.g., obj/pke.o_1, obj/pke.o_2
+# Generate separate object file lists for each level
 OBJECTS_BASE_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
 OBJECTS_BASE_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
 OBJECTS_BASE_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
@@ -80,6 +80,7 @@ kat: PQCgenKAT_pke_1 PQCgenKAT_pke_2 PQCgenKAT_pke_3
 
 # --- Linking Rules (per level) ---
 
+# Test programs use the REAL randombytes source
 test_lore_1: $(OBJECTS_BASE_1) $(OBJECTS_RANDOM_REAL_1) $(OBJECTS_TEST_MAIN_1)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_1) $^ -o $@ $(LDFLAGS)
 test_lore_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_REAL_2) $(OBJECTS_TEST_MAIN_2)
@@ -87,6 +88,7 @@ test_lore_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_REAL_2) $(OBJECTS_TEST_MAIN_2)
 test_lore_3: $(OBJECTS_BASE_3) $(OBJECTS_RANDOM_REAL_3) $(OBJECTS_TEST_MAIN_3)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_3) $^ -o $@ $(LDFLAGS)
 
+# Speed tests also use the REAL randombytes source
 test_speed_1: $(OBJECTS_BASE_1) $(OBJECTS_RANDOM_REAL_1) $(OBJECTS_SPEED_MAIN_1)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_1) $^ -o $@ $(LDFLAGS)
 test_speed_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_REAL_2) $(OBJECTS_SPEED_MAIN_2)
@@ -94,6 +96,7 @@ test_speed_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_REAL_2) $(OBJECTS_SPEED_MAIN_2)
 test_speed_3: $(OBJECTS_BASE_3) $(OBJECTS_RANDOM_REAL_3) $(OBJECTS_SPEED_MAIN_3)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_3) $^ -o $@ $(LDFLAGS)
 
+# KAT generation uses the DETERMINISTIC rng source
 PQCgenKAT_pke_1: $(OBJECTS_BASE_1) $(OBJECTS_RANDOM_KAT_1) $(OBJECTS_KAT_MAIN_1)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_1) $^ -o $@ $(LDFLAGS)
 PQCgenKAT_pke_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_KAT_2) $(OBJECTS_KAT_MAIN_2)
@@ -131,4 +134,4 @@ clean:
 	@echo "Done."
 
 # Declare these targets as "phony" as they do not represent actual files
-.PHONY: all test speed kat
+.PHONY: all test speed kat clean

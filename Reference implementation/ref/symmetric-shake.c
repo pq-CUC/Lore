@@ -60,3 +60,23 @@ void prf(uint8_t *out, size_t outlen, const uint8_t key[LORE_SYMBYTES], uint8_t 
 
     shake256(out, outlen, extkey, sizeof(extkey));
 }
+
+
+/**
+ * @brief Usage of SHAKE256 as a PRF for rejection sampling key generation.
+ * Concatenates a secret key and a public input (ciphertext) to generate a pseudorandom key.
+ *
+ * @param[out] out      Pointer to the output buffer (LORE_SYMBYTES bytes).
+ * @param[in]  key      Pointer to the secret key (LORE_SYMBYTES bytes).
+ * @param[in]  input    Pointer to the public input, typically the ciphertext (LORE_CIPHERTEXTBYTES bytes).
+ */
+void lore_shake256_rkprf(unsigned char out[LORE_SYMBYTES], const unsigned char key[LORE_SYMBYTES], const unsigned char input[LORE_CIPHERTEXTBYTES])
+{
+  keccak_state s;
+
+  shake256_init(&s);
+  shake256_absorb(&s, key, LORE_SYMBYTES);
+  shake256_absorb(&s, input, LORE_CIPHERTEXTBYTES);
+  shake256_finalize(&s);
+  shake256_squeeze(out, LORE_SYMBYTES, &s);
+}

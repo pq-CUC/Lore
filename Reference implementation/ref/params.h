@@ -69,8 +69,18 @@
 #define LORE_PUBLICKEYBYTES (LORE_SYMBYTES + (LORE_K * LORE_N) + ((LORE_K * LORE_N + 7) / 8) + (LORE_K * LORE_POLY_COMPRESSED_BYTES_T) + 50)
 
 // Size of the ciphertext in bytes
-#define LORE_CIPHERTEXTBYTES (((LORE_K + 1) * LORE_N) + (((LORE_K + 1) * LORE_N + 7) / 8) + (LORE_K * LORE_POLY_COMPRESSED_BYTES_T) + 50)
-
+#define LORE_CIPHERTEXTBYTES   LORE_INDCPA_BYTES
 #define LORE_POLY_BYTES (LORE_N * 2)
+
+// Manually define the size of a compressed polyvec based on LORE_K and the single poly size
+#define LORE_POLYVEC_COMPRESSED_BYTES_T (LORE_K * LORE_POLY_COMPRESSED_BYTES_T)
+
+// Define the size of the IND-CPA ciphertext
+#define LORE_INDCPA_BYTES ( (LORE_K+1) * LORE_N + ((LORE_K+1)*LORE_N/16) + LORE_POLYVEC_COMPRESSED_BYTES_T + 50)
+
+#define LORE_KEM_SECRETKEYBYTES  (LORE_SECRETKEYBYTES + LORE_PUBLICKEYBYTES + 2*LORE_SYMBYTES)
+#define LORE_KEM_PUBLICKEYBYTES  LORE_PUBLICKEYBYTES
+#define LORE_BYTES               LORE_SYMBYTES
+
 
 #endif

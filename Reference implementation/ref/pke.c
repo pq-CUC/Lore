@@ -3,6 +3,7 @@
 #include "symmetric.h"
 #include "randombytes.h"
 #include "string.h"
+#include "api.h"
 
 /*************************************************
 * Name:        crypto_pke_keypair
@@ -67,3 +68,4 @@ int crypto_pke_decrypt(unsigned char *m,
     *mlen = LORE_SYMBYTES;
     return 0;
 }
+

@@ -6,13 +6,13 @@
 #define NTESTS 100
 
 int main(void) {
-    unsigned char pk[CRYPTO_PUBLICKEYBYTES];
-    unsigned char sk[CRYPTO_SECRETKEYBYTES];
-    unsigned char ct[CRYPTO_CIPHERTEXTBYTES];
+
+    unsigned char pk[CRYPTO_PKE_PUBLICKEYBYTES];
+    unsigned char sk[CRYPTO_PKE_SECRETKEYBYTES];
+    unsigned char ct[CRYPTO_PKE_CIPHERTEXTBYTES];
     unsigned char msg[CRYPTO_BYTES];
     unsigned char pmsg[CRYPTO_BYTES];
     unsigned long long pmlen;
-    //int i,j,k;
     int i;
     int fails = 0;
 
@@ -20,19 +20,6 @@ int main(void) {
 
     for (i = 0; i < NTESTS; i++) {
         randombytes(msg, CRYPTO_BYTES);
-
-    /*
-        // -- Modify to print a bitstream of 0s and 1s --
-        printf("\n--- Iteration %d ---\n", i);
-        printf("Original message (bits) : ");
-        for(j = 0; j < CRYPTO_BYTES; j++) {
-            for(k = 7; k >= 0; k--) { // Print each bit from most significant to least significant
-                printf("%d", (msg[j] >> k) & 1);
-            }
-        }
-        printf("\n");
-        // -------------------------
-     */
 
         if (crypto_pke_keypair(pk, sk) != 0) {
             printf("ERROR in keypair on iteration %d\n", i);
@@ -52,18 +39,6 @@ int main(void) {
             continue;
         }
 
-    /*
-        // -- Modify to print a bitstream of 0s and 1s --
-        printf("Decrypted message (bits): ");
-        for(j = 0; j < CRYPTO_BYTES; j++) {
-            for(k = 7; k >= 0; k--) { // Print each bit from most significant to least significant
-                printf("%d", (pmsg[j] >> k) & 1);
-            }
-        }
-        printf("\n");
-        // -------------------------
-    */
-
         if (pmlen != CRYPTO_BYTES) {
             printf("ERROR: decrypted message length incorrect on iteration %d\n", i);
             fails++;
@@ -74,7 +49,7 @@ int main(void) {
             fails++;
             continue;
         }
-        
+
         if((i+1) % 10 == 0) {
             printf("Finished test %d/%d\n", i + 1, NTESTS);
         }

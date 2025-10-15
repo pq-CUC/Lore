@@ -37,12 +37,18 @@ static poly_crt res_crt;
 int main(void)
 {
   unsigned char pk[CRYPTO_PUBLICKEYBYTES];
-  unsigned char sk[CRYPTO_SECRETKEYBYTES];
+  unsigned char sk_pke[CRYPTO_PKE_SECRETKEYBYTES];
   unsigned char ct[CRYPTO_CIPHERTEXTBYTES];
   unsigned char msg[MLEN];
   unsigned long long mlen;
   int i;
 
+  unsigned char sk_kem[CRYPTO_SECRETKEYBYTES];
+  unsigned char ss[CRYPTO_BYTES];
+  unsigned char coins_kp[CRYPTO_KEYPAIRCOINBYTES];
+  randombytes(coins_kp, CRYPTO_KEYPAIRCOINBYTES);
+
+  
   // Variables for micro-benchmarking
   unsigned char seed[LORE_SYMBYTES];
   unsigned char coins[LORE_SYMBYTES];
@@ -60,7 +66,7 @@ int main(void)
   printf("--- Top Level API ---\n");
   for (i = 0; i < NTESTS; i++) {
       t[i] = cpucycles();
-      crypto_pke_keypair(pk, sk);
+      crypto_pke_keypair(pk, sk_pke);
   }
   print_results("crypto_pke_keypair:", t, NTESTS);
 
@@ -72,7 +78,7 @@ int main(void)
 
   for (i = 0; i < NTESTS; i++) {
       t[i] = cpucycles();
-      crypto_pke_decrypt(msg, &mlen, ct, sk);
+      crypto_pke_decrypt(msg, &mlen, ct, sk_pke);
   }
   print_results("crypto_pke_decrypt:", t, NTESTS);
 
@@ -81,7 +87,7 @@ int main(void)
   printf("\n--- IND-CPA Layer ---\n");
   for (i = 0; i < NTESTS; i++) {
       t[i] = cpucycles();
-      indcpa_keypair(pk, sk);
+      indcpa_keypair(pk, sk_pke);
   }
   print_results("indcpa_keypair:", t, NTESTS);
 
@@ -93,7 +99,7 @@ int main(void)
 
   for (i = 0; i < NTESTS; i++) {
       t[i] = cpucycles();
-      indcpa_dec(msg, ct, sk);
+      indcpa_dec(msg, ct, sk_pke);
   }
   print_results("indcpa_dec:", t, NTESTS);
 
@@ -163,6 +169,41 @@ int main(void)
   }
   print_results("gen_matrix (XOF):", t, NTESTS);
 
+    // === IND-CCA2 KEM Layer ===
+    printf("\n--- IND-CCA2 KEM Functions ---\n");
+    
+    // KEM-specific variables
 
+    randombytes(coins_kp, CRYPTO_KEYPAIRCOINBYTES);
+
+    for (i = 0; i < NTESTS; i++) {
+        t[i] = cpucycles();
+        crypto_kem_keypair_derand(pk, sk_kem, coins_kp);
+    }
+    print_results("crypto_kem_keypair_derand:", t, NTESTS);
+
+    for (i = 0; i < NTESTS; i++) {
+        t[i] = cpucycles();
+        crypto_kem_keypair(pk, sk_kem);
+    }
+    print_results("crypto_kem_keypair:", t, NTESTS);
+
+    for (i = 0; i < NTESTS; i++) {
+        t[i] = cpucycles();
+        crypto_kem_enc_derand(ct, ss, pk, coins);
+    }
+    print_results("crypto_kem_enc_derand:", t, NTESTS);
+
+    for (i = 0; i < NTESTS; i++) {
+        t[i] = cpucycles();
+        crypto_kem_enc(ct, ss, pk);
+    }
+    print_results("crypto_kem_enc:", t, NTESTS);
+
+    for (i = 0; i < NTESTS; i++) {
+        t[i] = cpucycles();
+        crypto_kem_dec(ss, ct, sk_kem);
+    }
+    print_results("crypto_kem_dec:", t, NTESTS);
   return 0;
 }

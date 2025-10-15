@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
 void
 fprintBstr(FILE *fp, const char *S, const unsigned char *A, unsigned long long L);
 
@@ -17,7 +18,7 @@ randombytes_init(unsigned char *entropy_input,
                  unsigned char *personalization_string,
                  int security_level);
 
-int
-randombytes(unsigned char *x, unsigned long long xlen);
+
+void randombytes(uint8_t *out, size_t outlen);
 uint32_t randombytes_uniform(uint32_t upper_bound);
-#endif /* RNG_H */
+#endif 

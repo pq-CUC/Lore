@@ -306,41 +306,39 @@ static void unpack_ciphertext_ntt(poly_crt_vec *cu_ntt, poly_crt *cv, const unsi
 
 
 /*************************************************
-* Name:        indcpa_keypair
+* Name:        indcpa_keypair_derand
 *
-* Description: Generates public and private key for the IND-CPA secure
-* public-key encryption scheme.
-*
-* Arguments:   - unsigned char *pk: pointer to output public key
-* - unsigned char *sk: pointer to output secret key
+* Description: Deterministically generates IND-CPA public and private key.
+* All randomness is derived from the input coins.
 **************************************************/
-void indcpa_keypair(unsigned char *pk, unsigned char *sk) {
+void indcpa_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned char *coins)
+{
     poly_crt_vec a_ntt[LORE_K];
     poly_crt_vec s_crt;
     poly_crt_vec b_final;
-    poly_sparse s_t_sparse[LORE_K]; // New: for storing the sparse t-part of s
+    poly_sparse s_t_sparse[LORE_K];
 
+    unsigned char buf[2 * LORE_SYMBYTES];
+    const unsigned char *seedA = buf;
+    const unsigned char *noiseseed = buf + LORE_SYMBYTES;
+    
+    shake256(buf, 2 * LORE_SYMBYTES, coins, LORE_SYMBYTES);
 
-    unsigned char seedA[LORE_SYMBYTES];
-    unsigned char noiseseed[LORE_SYMBYTES];
-    randombytes(noiseseed, LORE_SYMBYTES);
-    randombytes(seedA, LORE_SYMBYTES);
-     gen_matrix_ntt(a_ntt, seedA, 0);
+    gen_matrix_ntt(a_ntt, seedA, 0);
 
-    poly_getnoise(&s_crt, s_t_sparse, noiseseed, 0);
+    poly_getnoise(&s_crt, s_t_sparse, (unsigned char*)noiseseed, 0);
 
     poly_crt_vec_ntt(&s_crt);
 
     for (int i = 0; i < LORE_K; i++) {
     #if LORE_LEVEL == 1
-        // Level 1: Sparse multiplication is faster, keep as is
         poly_crt_vec_pointwise_acc_montgomery_sparse(&b_final.vec[i], &a_ntt[i], &s_crt, s_t_sparse);
     #else
-        // Level 2 & 3: The dense form of s is available, call the dense multiplication function directly to avoid conversion
         poly_crt_vec_pointwise_acc_montgomery(&b_final.vec[i], &a_ntt[i], &s_crt);
     #endif
     }
 
+    // (后续的舍入和打包逻辑保持不变)
     for(int i=0; i<LORE_K; ++i){
         poly delta_q_std;
         poly t_poly_orig = b_final.vec[i].t_poly;
@@ -365,6 +363,19 @@ void indcpa_keypair(unsigned char *pk, unsigned char *sk) {
 
     pack_pk_ntt(pk, seedA, &b_final);
     pack_sk(sk, s_t_sparse, &s_crt);
+}
+
+/*************************************************
+* Name:        indcpa_keypair
+*
+* Description: Randomly generates IND-CPA public and private key.
+* (This is now a wrapper around the deterministic version)
+**************************************************/
+void indcpa_keypair(unsigned char *pk, unsigned char *sk)
+{
+    unsigned char coins[LORE_SYMBYTES];
+    randombytes(coins, LORE_SYMBYTES);
+    indcpa_keypair_derand(pk, sk, coins);
 }
 
 /*************************************************
