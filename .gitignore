@@ -23,5 +23,8 @@ pip-selfcheck.json
 build/
 dist/
 
+# IDE and Editor specific
+.vscode/
+
 # Other
 .DS_Store
