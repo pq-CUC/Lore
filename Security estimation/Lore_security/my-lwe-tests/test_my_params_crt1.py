@@ -20,11 +20,13 @@ from estimator.nd import NoiseDistribution
 # ==============================================================================
 class ReconciliationDistribution(NoiseDistribution):
     """A wrapper class to adapt our probability dictionary for the estimator."""
-    
-    def __init__(self, dist: dict):
+
+    # 1. Fix: Make __init__ accept n=None and pass it to the base class
+    def __init__(self, dist: dict, n: int = None):
         """
         Manually defined constructor.
         :param dist: Stores our probability dictionary, e.g., {-1: 0.5, 1: 0.5}
+        :param n: The dimension of the distribution (required by the estimator)
         """
         # Store the core probability dictionary
         self.dist = dist
@@ -35,14 +37,16 @@ class ReconciliationDistribution(NoiseDistribution):
         
         # Call the parent class's constructor to set all required attributes
         super().__init__(
+            n=n,  # <--- Fix 1: Pass 'n' to the base class
             mean=RR(mean),
             stddev=RR(sqrt(variance)),
             bounds=(min(self.dist.keys()), max(self.dist.keys()))
         )
 
     def resize(self, new_n):
-        # The estimator needs this function, we can just have it return itself
-        return self
+        # 2. Fix: Return a *new* instance instead of 'self'
+        #    and pass the required 'dist' and 'new_n'
+        return ReconciliationDistribution(dist=self.dist, n=new_n)
 
     def __call__(self, *args, **kwargs):
         # Allows some parts of the estimator to call it like a function
