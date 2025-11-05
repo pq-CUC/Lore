@@ -44,7 +44,7 @@ class ReconciliationDistribution(NoiseDistribution):
         )
 
     def resize(self, new_n):
-        # 2. Fix: Return a *new* instance instead of 'self'
+        # 2. Fix: Return a *new* instance instead of  'self'
         #    and pass the required 'dist' and 'new_n'
         return ReconciliationDistribution(dist=self.dist, n=new_n)
 
