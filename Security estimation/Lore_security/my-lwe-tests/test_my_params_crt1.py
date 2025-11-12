@@ -1,6 +1,7 @@
-# File: my-tests/test_lore_pke_params.py
+# File: my-tests/test_my_params_crt1.py
 # This script provides a security analysis for the Lore PKE scheme,
 # with a correctly defined sparse secret distribution and a selectable error distribution.
+# (VERSION 3: Fixes NameError and SparseTernary logic)
 
 # --- Code required for the solution ---
 import sys
@@ -44,7 +45,7 @@ class ReconciliationDistribution(NoiseDistribution):
         )
 
     def resize(self, new_n):
-        # 2. Fix: Return a *new* instance instead of  'self'
+        # 2. Fix: Return a *new* instance instead of 'self'
         #    and pass the required 'dist' and 'new_n'
         return ReconciliationDistribution(dist=self.dist, n=new_n)
 
@@ -63,14 +64,17 @@ def build_reconciliation_law(t):
     """
     Builds the corresponding error distribution based on the provided t value and reconciliation rule.
     """
-    if t == 3:
+    # --- MODIFICATION: Added t=2 case ---
+    if t == 2:
+        dist_dict = {0: 0.5, 1: 0.5}
+    elif t == 3:
         dist_dict = {-1: 1/3, 0: 1/3, 1: 1/3}
     elif t == 7:
         dist_dict = {-2: 1/14, -1: 2/7, 0: 2/7, 1: 2/7, 2: 1/14}
     elif t == 13:
         dist_dict = {-2: 1/26, -1: 4/13, 0: 4/13, 1: 4/13, 2: 1/26}
     else:
-        raise ValueError("Unsupported t value for reconciliation. Please choose 3, 7, or 13.")
+        raise ValueError(f"Unsupported t value: {t}. Please choose 2, 3, 7, or 13.")
     
     # Return an instance of our new wrapper class
     return ReconciliationDistribution(dist=dist_dict)
@@ -80,52 +84,54 @@ print(" Security Assessment for Lore PKE Scheme (eta=1, Sparse Secrets)")
 print("="*60)
 
 # 2. Define the parameter sets for the Lore scheme
+# --- MODIFICATION: 't' and 'q_base' added ---
 lore_params = {
-    "Lore-128": {"n_ring": 256, "k": 2, "q": 3*257, "eta": 1, "e_agg_count": 1, "hw": 80},
-    "Lore-192": {"n_ring": 256, "k": 3, "q": 7*257, "eta": 1, "e_agg_count": 2, "hw": 120},
-    "Lore-256": {"n_ring": 256, "k": 4, "q": 13*257, "eta": 1, "e_agg_count": 4, "hw": 120}
+    "Lore-128-t2": {"n_ring": 256, "k": 2, "t": 2,  "q_base": 257, "hw": 80},
+    "Lore-128":    {"n_ring": 256, "k": 2, "t": 3,  "q_base": 257, "hw": 80},
+    "Lore-192":    {"n_ring": 256, "k": 3, "t": 7,  "q_base": 257, "hw": 120},
+    "Lore-256":    {"n_ring": 256, "k": 4, "t": 13, "q_base": 257, "hw": 120},
 }
 
-# Parameter for the selectable distribution
-RECONCILIATION_T = 3
+# (Global RECONCILIATION_T variable removed)
 
 # 3. Loop through each parameter set and perform the evaluation
 for name, params in lore_params.items():
-    print(f"\n--- Evaluating parameter set: {name} (hw={params['hw']}) ---\n")
+    
+    # --- FIX 1: Get t_val and q_val from the params dictionary ---
+    t_val = params['t']
+    q_val = t_val * params['q_base']
+    k_val = params['k']
+    
+    print(f"\n--- Evaluating parameter set: {name} (t={t_val}, hw={params['hw']}) ---\n")
 
     # A. Security assessment for Key Recovery Attack (MLWE -> LWE)
     print(">>> (A) Key Recovery Attack (MLWE -> LWE)")
 
-    lwe_n = params["n_ring"] * params["k"]
-    lwe_m = params["n_ring"] * params["k"]
+    lwe_n = params["n_ring"] * k_val
+    lwe_m = params["n_ring"] * k_val
 
-    # a) Distribution of the secret key s (remains unchanged)
-    p = m = params['hw'] // 2
-    dist_s = ND.SparseTernary(p, m, n=params["n_ring"])
+    # a) Distribution of the secret key s (LOGIC FIX)
+    # Calculate TOTAL p and m for the flattened LWE vector
+    total_hw = params['hw'] * k_val 
+    total_p = total_m = total_hw // 2
+    dist_s = ND.SparseTernary(total_p, total_m, n=lwe_n) # Create dist for n=lwe_n
 
-    # b) Distribution of the noise e (now selectable)
-    if RECONCILIATION_T in [3, 7, 13]:
-        dist_e = build_reconciliation_law(RECONCILIATION_T)
-    else:
-        error_variance = params["e_agg_count"] * (params["eta"] / 2.0)
-        error_stddev = sqrt(error_variance)
-        dist_e = ND.DiscreteGaussian(error_stddev)
+    # b) Distribution of the noise e (NAMEERROR FIX)
+    # --- FIX 2: Replace the 'if RECONCILIATION_T ...' block ---
+    dist_e = build_reconciliation_law(t_val)
 
     # Define the LWE problem instance
     mlwe_params = LWE.Parameters(
         n=lwe_n,
-        q=params["q"],
-        Xs=dist_s,
+        q=q_val,
+        Xs=dist_s, # Use the correctly flattened secret distribution
         Xe=dist_e,
         m=lwe_m,
         tag=f"{name}-KeyRecovery"
     )
 
-    print("Secret distribution:", dist_s)
-    if RECONCILIATION_T in [3, 7, 13]:
-        print(f"Error distribution: Reconciliation law for t={RECONCILIATION_T} -> {dist_e}")
-    else:
-        print("Error distribution (Gaussian):", dist_e)
+    print("Secret distribution (Flattened):", dist_s)
+    print(f"Error distribution: Reconciliation law for t={t_val} -> {dist_e}")
     print("LWE equivalent parameters:", mlwe_params)
 
     # --- Classical Computer Security Assessment ---
