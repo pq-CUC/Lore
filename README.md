@@ -27,11 +27,11 @@ This repository includes:
 
 ## 1. C Reference Implementation
 
-Located in `Lore/Reference implementation/ref/`, this is a full C implementation of the Lore scheme, supporting three security levels (128-bit, 192-bit, and 256-bit) as defined in the paper.
+Located in `Lore/Reference implementation/ref/`, this is a full C implementation of the Lore scheme, supporting four security levels (128-bit, 256-bit, 384-bit, and 512-bit) as defined in the paper.
 
 ### Compilation
 
-The project uses a `Makefile` that defines different compilation flags for each security level (`-DLORE_LEVEL=1`, `-DLORE_LEVEL=2`, `-DLORE_LEVEL=3`).
+The project uses a `Makefile` that defines different compilation flags for each security level (-DLORE_LEVEL=1, -DLORE_LEVEL=2, -DLORE_LEVEL=3, -DLORE_LEVEL=4).
 
 **Compiling All Levels**
 
@@ -43,9 +43,9 @@ make
 ```
 
 This will generate the following executables:
-* `test_lore_1`, `test_lore_2`, `test_lore_3`
-* `test_speed_1`, `test_speed_2`, `test_speed_3`
-* `PQCgenKAT_pke_1`, `PQCgenKAT_pke_2`, `PQCgenKAT_pke_3`
+* `test_lore_1`, `test_lore_2`, `test_lore_3`, `test_lore_4`
+* `test_speed_1`, `test_speed_2`, `test_speed_3`, `test_speed_4`
+* `PQCgenKAT_pke_1`, `PQCgenKAT_pke_2`, `PQCgenKAT_pke_3`, `PQCgenKAT_pke_4`
 
 **Compiling a Specific Level**
 
@@ -56,7 +56,7 @@ To compile only the functionality test for Level 1 (128-bit security):
 make test_lore_1
 ```
 
-To compile only the speed test for Level 2 (192-bit security):
+To compile only the speed test for Level 2 (256-bit security):
 ```bash
 make test_speed_2
 ```
@@ -106,6 +106,18 @@ This script calculates the probability of a single coefficient failing decryptio
 # Ensure you are in the Lore/Security estimation/ directory
 python ./Lore_failure/Lore_failure_crt_e.py
 ```
+## Implementation Notes
+
+> **Disclaimer:** This reference implementation is provided primarily as an academic proof-of-concept to demonstrate the algorithmic correctness of the Lore KEM (Variable Modulus & CRT Compression). It is currently optimized for readability and algorithmic verification. Production-level cryptographic engineering practices, such as strict namespace isolation, memory zeroization, and comprehensive countermeasures against side-channel attacks, are acknowledged and planned for future updates.
+
+## License and Acknowledgements
+
+This repository contains original code for the Lore cryptosystem as well as third-party components. We gratefully acknowledge the following works:
+
+* **BCH Codec:** The BCH error correction code implementation (`bch_codec.c` and `bch_codec.h`) is originally copyrighted by Parrot S.A. and is distributed under the **GNU General Public License v2.0 (GPLv2)**.
+* **Keccak/SHA-3:** The implementation of the FIPS 202 standard (`fips202.c` and `fips202.h`) is based on code released into the public domain.
+
+*(Note: Please ensure you comply with the GPLv2 requirements if you plan to integrate this reference code into proprietary systems.)*
 
 ## Citation
 
