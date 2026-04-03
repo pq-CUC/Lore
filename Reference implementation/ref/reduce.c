@@ -35,14 +35,13 @@ int16_t montgomery_reduce(int64_t a) {
 * Returns:     a mod q.
 **************************************************/
 int16_t barrett_reduce(int16_t a) {
-    // Use a 32-bit integer to prevent overflow in intermediate calculations
+
     int16_t t = a;
     
     // First reduction: t = (t & 0xFF) - (t >> 8)
     // This corresponds to X = r - k (since 2^8 ≡ -1 mod 257)
     t = (t & 0xFF) - (t >> 8);
 
-    // Second reduction is commented out as per your request
      t = (t & 0xFF) - (t >> 8);
     
     return (int16_t)t;
@@ -53,6 +52,7 @@ int16_t barrett_reduce(int16_t a) {
 * Name:        poly_reduce
 *
 * Description: Applies Barrett reduction to all coefficients of a polynomial.
+* The loop is unrolled 4 times for performance.
 *
 * Arguments:   - poly *r: pointer to input/output polynomial
 **************************************************/

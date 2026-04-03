@@ -5,12 +5,10 @@
 #include <stdint.h>
 
 /*************************************************
-* Name:        sample_fixed_weight (FINAL OPTIMIZED VERSION)
+* Name:        sample_fixed_weight 
 *
-* Description: Uses a unified sampling logic to sample the total Hamming weight
-* across all k*N positions. This version employs a cryptographically
-* secure, highly performance-optimized unbiased sampling technique
-* to achieve the best balance of security and efficiency.
+* Description: Unified rejection sampling to generate a fixed-weight 
+* error vector across all k*N positions using the Fisher-Yates shuffle.
 *
 * Arguments:   - poly_crt_vec *r_crt_vec:     pointer to the output CRT polynomial vector
 * - poly_sparse *r_sparse_vec:   pointer to the output sparse polynomial vector
@@ -21,8 +19,8 @@ void sample_fixed_weight(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, con
 {
     // Buffer with a slight redundancy for the rare case of rejection events
     #define BUF_SIZE (LORE_K * LORE_HWT_TOTAL * 2 + 128)
-    static uint8_t buf[BUF_SIZE];
-    static uint16_t positions[LORE_K * LORE_N];
+    uint8_t buf[BUF_SIZE];
+    uint16_t positions[LORE_K * LORE_N];
 
     // 1. PRF - Generate all necessary random bytes for the sampling process in one go
     prf(buf, BUF_SIZE, seed, nonce);
@@ -55,7 +53,7 @@ void sample_fixed_weight(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, con
             uint16_t rand_val;
             uint16_t choice_idx;
             
-            // This is a highly optimized rejection sampling loop that, in the vast majority of cases, executes only once
+            // Rejection sampling loop for unbiased index selection.
             do {
                 if (buf_pos + 2 > BUF_SIZE) return; // Security check
                 rand_val = (uint16_t)(buf[buf_pos] | ((uint16_t)buf[buf_pos + 1] << 8));
@@ -64,7 +62,7 @@ void sample_fixed_weight(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, con
             } while ((uint16_t)m < current_len); // Rejection condition: lower 16 bits of m < current_len
 
             choice_idx = (uint16_t)(m >> 16); // Take the upper 16 bits of m as the unbiased result
-            // =======================================================================================
+
 
             uint16_t global_pos = positions[choice_idx];
 
@@ -73,9 +71,8 @@ void sample_fixed_weight(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, con
             current_len--;
 
             // Map the global position to a specific polynomial index and local position
-            int poly_idx = global_pos >> 8; // Use efficient bit shift operation
-            uint16_t local_pos = global_pos & 0xFF; // Use efficient bitwise AND operation instead of modulo
-
+            int poly_idx = global_pos / LORE_N;
+            uint16_t local_pos = global_pos % LORE_N;
             // Directly populate the CRT and sparse structures of the poly_idx-th polynomial
             poly_crt *crt = &r_crt_vec->vec[poly_idx];
             poly_sparse *sparse = &r_sparse_vec[poly_idx];
@@ -85,7 +82,7 @@ void sample_fixed_weight(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, con
             crt->t_poly.coeffs[local_pos] = value;
 
             // Populate sparse structure
-            sparse->pos[sparse->n_coeffs] = (uint8_t)local_pos;
+            sparse->pos[sparse->n_coeffs] = local_pos;
             sparse->val[sparse->n_coeffs] = (int8_t)value;
             sparse->n_coeffs++;
         }

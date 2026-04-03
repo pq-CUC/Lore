@@ -3,7 +3,7 @@
 #include <string.h>
 
 #define OVERFLOWING_MUL(X, Y) ((int16_t)((int32_t)(X) * (int32_t)(Y)))
-#define KARATSUBA_N 64
+#define KARATSUBA_N N_SB
 #define N_SB (LORE_N >> 2)
 #define N_SB_RES (2 * N_SB - 1)
 
@@ -135,9 +135,14 @@ static void toom_cook_4way(const int16_t *a1, const int16_t *b1, int16_t *result
         r5 += r1; r1 = (int16_t)(((int64_t)(r1 + (r3 << 4)) * inv9) >> 1);
         r3 = (int16_t)(-(r3 + r1)); r5 = (int16_t)(((int64_t)(30 * r1 - r5) * inv15) >> 2);
         r2 -= r4; r1 -= r5;
-        result[i] += r6; result[i + 64] += r5; result[i + 128] += r4;
-        result[i + 192] += r3; result[i + 256] += r2; result[i + 320] += r1;
-        result[i + 384] += r0;
+        // Accumulate results with N_SB offsets.
+        result[i] += r6; 
+        result[i + N_SB] += r5; 
+        result[i + 2 * N_SB] += r4;
+        result[i + 3 * N_SB] += r3; 
+        result[i + 4 * N_SB] += r2; 
+        result[i + 5 * N_SB] += r1;
+        result[i + 6 * N_SB] += r0;
     }
 }
 

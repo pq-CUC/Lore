@@ -2,16 +2,17 @@
 #include <string.h>
 #include "../api.h"
 #include "../randombytes.h"
+#include "../params.h"
 
-#define NTESTS 100
+#define NTESTS 1000
 
 int main(void) {
 
     unsigned char pk[CRYPTO_PKE_PUBLICKEYBYTES];
     unsigned char sk[CRYPTO_PKE_SECRETKEYBYTES];
     unsigned char ct[CRYPTO_PKE_CIPHERTEXTBYTES];
-    unsigned char msg[CRYPTO_BYTES];
-    unsigned char pmsg[CRYPTO_BYTES];
+    unsigned char msg[LORE_MSG_BYTES];  
+    unsigned char pmsg[LORE_MSG_BYTES]; 
     unsigned long long pmlen;
     int i;
     int fails = 0;
@@ -19,7 +20,7 @@ int main(void) {
     printf("Starting tests for %s\n", CRYPTO_ALGNAME);
 
     for (i = 0; i < NTESTS; i++) {
-        randombytes(msg, CRYPTO_BYTES);
+        randombytes(msg, LORE_MSG_BYTES);
 
         if (crypto_pke_keypair(pk, sk) != 0) {
             printf("ERROR in keypair on iteration %d\n", i);
@@ -27,7 +28,7 @@ int main(void) {
             continue;
         }
 
-        if (crypto_pke_encrypt(ct, msg, CRYPTO_BYTES, pk) != 0) {
+        if (crypto_pke_encrypt(ct, msg, LORE_MSG_BYTES, pk) != 0) {
             printf("ERROR in encrypt on iteration %d\n", i);
             fails++;
             continue;
@@ -39,19 +40,17 @@ int main(void) {
             continue;
         }
 
-        if (pmlen != CRYPTO_BYTES) {
+        if (pmlen != LORE_MSG_BYTES) {
             printf("ERROR: decrypted message length incorrect on iteration %d\n", i);
             fails++;
             continue;
         }
-        if (memcmp(msg, pmsg, CRYPTO_BYTES)) {
+        if (memcmp(msg, pmsg, LORE_MSG_BYTES)) {
+            printf("Original MSG[0] = %02X\n", msg[0]);
+            printf("Decrypted MSG[0] = %02X\n", pmsg[0]);
             printf("ERROR: decrypted message does not match original on iteration %d\n", i);
             fails++;
             continue;
-        }
-
-        if((i+1) % 10 == 0) {
-            printf("Finished test %d/%d\n", i + 1, NTESTS);
         }
     }
 

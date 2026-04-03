@@ -5,7 +5,22 @@
 #include <stddef.h>
 #include "params.h"
 #include "fips202.h"
-
+// Constant-time symmetric reduction modulo M.
+// Maps x to the range [-M/2, M/2] without timing-dependent branches.
+static inline int16_t sym_mod(int32_t x, int32_t M) {
+    int32_t val = x % M;
+    
+    // If val < 0, add M. Extract sign bit using bitwise operations.
+    uint32_t sign = (uint32_t)val >> 31; 
+    val += (int32_t)(sign * M);
+    
+    // If val > M / 2, it is equivalent to (M / 2) - val < 0.
+    int32_t diff = (M / 2) - val;
+    uint32_t diff_sign = (uint32_t)diff >> 31;
+    val -= (int32_t)(diff_sign * M);
+    
+    return (int16_t)val;
+}
 typedef struct {
     int16_t coeffs[LORE_N];
 } poly;
@@ -23,10 +38,10 @@ typedef struct {
 
 // Sparse polynomial structure
 typedef struct {
-    // Expand capacity to prevent buffer overflows during unified sampling
-    uint8_t pos[LORE_K * LORE_HWT_TOTAL]; // coefficient index (degree), 0-255
-    int8_t  val[LORE_K * LORE_HWT_TOTAL]; // coefficient value (-2, -1, 1, 2)
-    int16_t n_coeffs;          // total number of non-zero coefficients
+    // Uses uint16_t to accommodate indices up to N=768 without truncation.
+    uint16_t pos[LORE_K * LORE_HWT_TOTAL]; 
+    int8_t   val[LORE_K * LORE_HWT_TOTAL]; 
+    int16_t  n_coeffs;          
 } poly_sparse;
 
 // Function declarations

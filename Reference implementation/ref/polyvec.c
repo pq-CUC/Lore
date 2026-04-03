@@ -116,34 +116,29 @@ void poly_crt_vec_invntt_tomont(poly_crt_vec *v) {
 void poly_crt_vec_pointwise_acc_montgomery(poly_crt *r, const poly_crt_vec *a_row_dense, const poly_crt_vec *b_dense) {
     poly_crt t;
 
-    // q-part (NTT domain)
+    /* q-part (NTT domain) */
     poly_pointwise_montgomery(&r->q_poly, &a_row_dense->vec[0].q_poly, &b_dense->vec[0].q_poly);
     for (int i = 1; i < LORE_K; i++) {
         poly_pointwise_montgomery(&t.q_poly, &a_row_dense->vec[i].q_poly, &b_dense->vec[i].q_poly);
         poly_add(&r->q_poly, &r->q_poly, &t.q_poly);
     }
 
-    // t-part (normal domain) - use Karatsuba convolution and mod t accumulation
+    /* t-part (normal domain): use Karatsuba convolution and mod t accumulation */
     poly t_prod;
-    
-    // 1. Calculate the first product a_row[0] * b[0] and store it directly in r->t_poly
-    // The poly_mul_modt function handles mod t reduction and centering internally.
+    /* Calculate the first product and store directly in r->t_poly */
     poly_mul_modt(&r->t_poly, &a_row_dense->vec[0].t_poly, &b_dense->vec[0].t_poly);
 
-    // 2. Calculate subsequent products and accumulate them correctly into r->t_poly
     for (int i = 1; i < LORE_K; i++) {
         poly_mul_modt(&t_prod, &a_row_dense->vec[i].t_poly, &b_dense->vec[i].t_poly);
-        
-        // Accumulate the new product into the result, with proper mod t reduction at each step
+        /* Calculate subsequent products and accumulate */
         for(int j=0; j<LORE_N; ++j) {
             int16_t sum = r->t_poly.coeffs[j] + t_prod.coeffs[j];
-            sum %= LORE_T;
-            if (sum > LORE_T / 2) {
-                sum -= LORE_T;
-            }
-            while (sum < -(LORE_T / 2)) {
-                sum += LORE_T;
-            }
+            
+            /* Constant time reduction mapping to [-T/2, T/2) */
+            sum = sum % LORE_T;
+            sum += (sum >> 15) & LORE_T; 
+            sum -= ((LORE_T / 2 - sum) >> 15) & LORE_T;
+
             r->t_poly.coeffs[j] = sum;
         }
     }
@@ -167,7 +162,7 @@ void poly_crt_vec_pointwise_acc_montgomery(poly_crt *r, const poly_crt_vec *a_ro
 void poly_crt_vec_pointwise_acc_montgomery_sparse(poly_crt *r, const poly_crt_vec *a_row_dense, const poly_crt_vec *b_crt_with_ntt_q, const poly_sparse *b_t_poly_sparse_vec) {
     poly_crt t_q_only;
 
-    // Step 1: q-part (in NTT domain) - logic is the same for all levels
+    /* q-part (in NTT domain) */
     poly_pointwise_montgomery(&r->q_poly, &a_row_dense->vec[0].q_poly, &b_crt_with_ntt_q->vec[0].q_poly);
     for (int i = 1; i < LORE_K; i++) {
         poly_pointwise_montgomery(&t_q_only.q_poly, &a_row_dense->vec[i].q_poly, &b_crt_with_ntt_q->vec[i].q_poly);
@@ -176,7 +171,7 @@ void poly_crt_vec_pointwise_acc_montgomery_sparse(poly_crt *r, const poly_crt_ve
 
     // Step 2: t-part (in standard domain) - use conditional compilation to select the optimal algorithm
 #if LORE_LEVEL == 1
-    // --- Level 1 Specific: Use the original, most efficient sparse multiplication ---
+    // Level 1: Sparse polynomial multiplication.
     poly_sparse_mul_modt(&r->t_poly, &a_row_dense->vec[0].t_poly, &b_t_poly_sparse_vec[0]);
     for (int i = 1; i < LORE_K; i++) {
         poly t_temp_prod;
@@ -184,7 +179,7 @@ void poly_crt_vec_pointwise_acc_montgomery_sparse(poly_crt *r, const poly_crt_ve
         poly_add_modt(&r->t_poly, &r->t_poly, &t_temp_prod);
     }
 #else
-    // --- Level 2 & 3 Specific: Use the highest performance Toom-Cook multiplication ---
+    // Levels 2, 3, 4: Dense polynomial multiplication via Toom-Cook.
     poly b_t_dense_temp; // For temporarily storing the converted dense polynomial
 
     // Calculate a_row[0] * s[0]

@@ -125,7 +125,16 @@ randombytes(uint8_t *x, size_t xlen)
     reseed_counter++;
 }
 
-// ** Key fix: Add a deterministic implementation of randombytes_uniform **
+/*************************************************
+* Name:        randombytes_uniform
+*
+* Description: Deterministic implementation of randombytes_uniform.
+* Returns a random integer uniformly distributed in [0, upper_bound - 1].
+*
+* Arguments:   - uint32_t upper_bound: the upper bound
+*
+* Returns:     the random integer
+**************************************************/
 uint32_t randombytes_uniform(uint32_t upper_bound)
 {
   uint32_t r, min;

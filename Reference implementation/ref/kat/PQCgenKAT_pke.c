@@ -61,7 +61,7 @@ int main() {
     char                fn_req[64], fn_rsp[64];
     FILE                *fp_req, *fp_rsp;
     unsigned char       seed[48];
-    unsigned char       msg[CRYPTO_BYTES];
+    unsigned char       msg[LORE_MSG_BYTES];
     unsigned char       entropy_input[48];
     int                 count;
 
@@ -86,9 +86,9 @@ int main() {
         fprintf(fp_req, "count = %d\n", i);
         randombytes(seed, 48);
         fprintBstr(fp_req, "seed = ", seed, 48);
-        fprintf(fp_req, "mlen = %d\n", CRYPTO_BYTES);
-        randombytes(msg, CRYPTO_BYTES);
-        fprintBstr(fp_req, "msg = ", msg, CRYPTO_BYTES);
+        fprintf(fp_req, "mlen = %d\n", LORE_MSG_BYTES);
+        randombytes(msg, LORE_MSG_BYTES);
+        fprintBstr(fp_req, "msg = ", msg, LORE_MSG_BYTES);
         fprintf(fp_req, "\n");
     }
     fclose(fp_req);
@@ -100,9 +100,9 @@ int main() {
     fprintf(fp_rsp, "# %s\n", CRYPTO_ALGNAME);
 
     pk = (unsigned char *)calloc(CRYPTO_PUBLICKEYBYTES, sizeof(unsigned char));
-    sk = (unsigned char *)calloc(CRYPTO_SECRETKEYBYTES, sizeof(unsigned char));
+    sk = (unsigned char *)calloc(CRYPTO_PKE_SECRETKEYBYTES, sizeof(unsigned char));
     ct = (unsigned char *)calloc(CRYPTO_CIPHERTEXTBYTES, sizeof(unsigned char));
-    pmsg = (unsigned char *)calloc(CRYPTO_BYTES, sizeof(unsigned char));
+    pmsg = (unsigned char *)calloc(LORE_MSG_BYTES, sizeof(unsigned char));
 
     char line[512];
     while(fgets(line, sizeof(line), fp_req) && line[0] == '#');
@@ -110,7 +110,7 @@ int main() {
     do {
         if (sscanf(line, "count = %d", &count) != 1) break;
         fprintf(fp_rsp, "count = %d\n", count);
-        printf("DEBUG: Processing count %d...\n", count);
+        //printf("DEBUG: Processing count %d...\n", count);
 
         if (!fgets(line, sizeof(line), fp_req) || !hex_str_to_bytes(seed, line, 48)) {
             fprintf(stderr, "ERROR: Failed to read seed for count %d\n", count); return KAT_DATA_ERROR;
@@ -130,39 +130,38 @@ int main() {
         
         size_t pk_main_data_len = LORE_K * LORE_N;
         size_t pk_total_overflow_bits = 0;
+        
         for(size_t i = 0; i < pk_main_data_len; ++i) {
             if (pk[LORE_SYMBYTES + i] == 0xFF) {
                 pk_total_overflow_bits++;
             }
         }
         size_t pk_overflow_data_len = (pk_total_overflow_bits + 7) / 8;
-        size_t pk_t_data_len = 0;
-        #if LORE_R_BITS > 0
-            pk_t_data_len = LORE_K * ((LORE_N * LORE_R_BITS + 7) / 8);
-        #endif
-        size_t actual_pk_len = LORE_SYMBYTES + pk_main_data_len + pk_overflow_data_len + pk_t_data_len;
+        size_t pk_t_data_len = LORE_K * LORE_POLY_COMPRESSED_BYTES_T;
+        
+        size_t actual_pk_len = LORE_SYMBYTES + pk_main_data_len + pk_overflow_data_len + pk_t_data_len ;
+
         fprintBstr(fp_rsp, "pk = ", pk, actual_pk_len);
 
-        fprintBstr(fp_rsp, "sk = ", sk, CRYPTO_SECRETKEYBYTES);
+        fprintBstr(fp_rsp, "sk = ", sk, CRYPTO_PKE_SECRETKEYBYTES);
         
         if (crypto_pke_encrypt(ct, msg, mlen, pk) != 0) { printf("crypto_pke_encrypt error\n"); return KAT_CRYPTO_FAILURE; }
         
-        size_t main_data_len = (LORE_K + 1) * LORE_N;
-        size_t total_overflow_bits = 0;
-        for(size_t i = 0; i < main_data_len; ++i) {
+        size_t ct_main_data_len = LORE_K * LORE_N;
+        size_t ct_total_overflow_bits = 0;
+        
+        for(size_t i = 0; i < ct_main_data_len; ++i) {
             if (ct[i] == 0xFF) {
-                total_overflow_bits++;
+                ct_total_overflow_bits++;
             }
         }
-        size_t overflow_data_len = (total_overflow_bits + 7) / 8;
+        size_t ct_overflow_data_len = (ct_total_overflow_bits + 7) / 8;
+        size_t ct_cu_t_data_len = LORE_POLYVEC_COMPRESSED_BYTES_T;
+        size_t ct_cv_q_data_len = LORE_N / 8;
+        size_t ct_cv_t_data_len = LORE_CV_T_BYTES;
         
-        size_t t_data_len = 0;
-        #if LORE_R_BITS > 0
-            t_data_len = LORE_K * ((LORE_N * LORE_R_BITS + 7) / 8);
-        #endif
-        
-        size_t actual_ct_len = main_data_len + overflow_data_len + t_data_len;
-        
+        size_t actual_ct_len = ct_main_data_len + ct_overflow_data_len + ct_cu_t_data_len + ct_cv_q_data_len + ct_cv_t_data_len;
+
         fprintBstr(fp_rsp, "ct = ", ct, actual_ct_len);
         
         if (crypto_pke_decrypt(pmsg, &mlen, ct, sk) != 0) { printf("crypto_pke_decrypt error\n"); return KAT_CRYPTO_FAILURE; }

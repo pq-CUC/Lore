@@ -39,30 +39,27 @@ static void hash_g(uint8_t *out, const uint8_t *in, size_t inlen) {
 /*************************************************
 * Name:        crypto_kem_keypair_derand
 *
-* Description: Generates public and private key for the CCA-secure KEM.
-* (deterministic version)
+* Description: Deterministic generation of public and secret key
+* for the CCA-secure Lore KEM.
 *
-* Arguments:   - unsigned char *pk:    pointer to output public key
-* (an already allocated array of LORE_PUBLICKEYBYTES bytes)
-* - unsigned char *sk:    pointer to output secret key
-* (an already allocated array of LORE_SECRETKEYBYTES bytes)
-* - const unsigned char *coins: pointer to input randomness
-* (an already allocated array of 2 * LORE_SYMBYTES bytes)
+* Arguments:   - uint8_t *pk: pointer to output public key (length LORE_PUBLICKEYBYTES)
+* - uint8_t *sk: pointer to output secret key (length LORE_SECRETKEYBYTES)
+* - const uint8_t *coins: pointer to input randomness (length 2*LORE_SYMBYTES)
 *
-* Returns 0 (success)
+* Returns:     0 on success
 **************************************************/
 int crypto_kem_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned char *coins)
 {
-    // Call the IND-CPA keypair generation function
     indcpa_keypair_derand(pk, sk, coins);
-
-    // Append public key, hash of public key, and z to the secret key
+    /* sk = sk' || pk || H(pk) || z */
     unsigned char *sk_rest = sk + LORE_SECRETKEYBYTES;
     memcpy(sk_rest, pk, LORE_PUBLICKEYBYTES);
     sk_rest += LORE_PUBLICKEYBYTES;
     hash_h(sk_rest, pk, LORE_PUBLICKEYBYTES);
     sk_rest += LORE_SYMBYTES;
-    memcpy(sk_rest, coins + LORE_SYMBYTES, LORE_SYMBYTES);
+    for(size_t i = 0; i < LORE_SYMBYTES; i++) {
+        sk_rest[i] = coins[LORE_SYMBYTES + i];
+    }
 
     return 0;
 }
@@ -108,18 +105,26 @@ int crypto_kem_keypair(unsigned char *pk, unsigned char *sk)
 int crypto_kem_enc_derand(unsigned char *ct, unsigned char *ss, const unsigned char *pk, const unsigned char *coins)
 {
     unsigned char kr[2 * LORE_SYMBYTES];
-    unsigned char buf[2 * LORE_SYMBYTES];
-    unsigned char mu[LORE_SYMBYTES];
+    unsigned char buf[LORE_MSG_BYTES + LORE_SYMBYTES];
 
-    memcpy(mu, coins, LORE_SYMBYTES);
+    hash_h(buf + LORE_MSG_BYTES, pk, LORE_PUBLICKEYBYTES);
+    memcpy(buf, coins, LORE_MSG_BYTES); 
+    hash_g(kr, buf, LORE_MSG_BYTES + LORE_SYMBYTES);
 
-    hash_h(buf + LORE_SYMBYTES, pk, LORE_PUBLICKEYBYTES);
-    memcpy(buf, mu, LORE_SYMBYTES);
-    hash_g(kr, buf, 2 * LORE_SYMBYTES);
+    indcpa_enc(ct, coins, pk, kr + LORE_SYMBYTES);
 
-    indcpa_enc(ct, mu, pk, kr + LORE_SYMBYTES);
+  
+    unsigned char kdf_buf[2 * LORE_SYMBYTES];
+    
 
-    memcpy(ss, kr, LORE_SYMBYTES);
+    memcpy(kdf_buf, kr, LORE_SYMBYTES); 
+    
+
+    hash_h(kdf_buf + LORE_SYMBYTES, ct, LORE_CIPHERTEXTBYTES); 
+    
+
+    shake256(ss, LORE_SYMBYTES, kdf_buf, 2 * LORE_SYMBYTES);
+
 
     return 0;
 }
@@ -141,8 +146,8 @@ int crypto_kem_enc_derand(unsigned char *ct, unsigned char *ss, const unsigned c
 **************************************************/
 int crypto_kem_enc(unsigned char *ct, unsigned char *ss, const unsigned char *pk)
 {
-    unsigned char coins[LORE_SYMBYTES];
-    randombytes(coins, LORE_SYMBYTES);
+    unsigned char coins[LORE_MSG_BYTES];
+    randombytes(coins, LORE_MSG_BYTES);
     crypto_kem_enc_derand(ct, ss, pk, coins);
     return 0;
 }
@@ -164,9 +169,9 @@ int crypto_kem_enc(unsigned char *ct, unsigned char *ss, const unsigned char *pk
 int crypto_kem_dec(unsigned char *ss, const unsigned char *ct, const unsigned char *sk)
 {
     int fail;
-    unsigned char mu[LORE_SYMBYTES];
+    unsigned char mu[LORE_MSG_BYTES]; 
     unsigned char kr[2 * LORE_SYMBYTES];
-    unsigned char buf[2 * LORE_SYMBYTES];
+    unsigned char buf[LORE_MSG_BYTES + LORE_SYMBYTES];
     unsigned char ct_cmp[LORE_CIPHERTEXTBYTES];
     unsigned char ss_invalid[LORE_SYMBYTES];
 
@@ -177,9 +182,9 @@ int crypto_kem_dec(unsigned char *ss, const unsigned char *ct, const unsigned ch
 
     indcpa_dec(mu, ct, sk_indcpa);
 
-    memcpy(buf, mu, LORE_SYMBYTES);
-    memcpy(buf + LORE_SYMBYTES, pkh, LORE_SYMBYTES);
-    hash_g(kr, buf, 2 * LORE_SYMBYTES);
+    memcpy(buf, mu, LORE_MSG_BYTES); 
+    memcpy(buf + LORE_MSG_BYTES, pkh, LORE_SYMBYTES);
+    hash_g(kr, buf, LORE_MSG_BYTES + LORE_SYMBYTES);
 
     indcpa_enc(ct_cmp, mu, pk, kr + LORE_SYMBYTES);
 
@@ -187,8 +192,25 @@ int crypto_kem_dec(unsigned char *ss, const unsigned char *ct, const unsigned ch
 
     rkprf(ss_invalid, z, ct);
 
-    cmov(ss, kr, LORE_SYMBYTES, (unsigned char)(1 - fail));
+
+    unsigned char kdf_buf[2 * LORE_SYMBYTES];
+    unsigned char ss_valid[LORE_SYMBYTES];
+    
+
+    memcpy(kdf_buf, kr, LORE_SYMBYTES); 
+    
+
+    hash_h(kdf_buf + LORE_SYMBYTES, ct, LORE_CIPHERTEXTBYTES); 
+    
+
+    shake256(ss_valid, LORE_SYMBYTES, kdf_buf, 2 * LORE_SYMBYTES);
+
+
+
+    cmov(ss, ss_valid, LORE_SYMBYTES, (unsigned char)(1 - fail));
     cmov(ss, ss_invalid, LORE_SYMBYTES, (unsigned char)fail);
 
+    for(size_t i = 0; i < LORE_MSG_BYTES; i++) mu[i] = 0;
+    for(size_t i = 0; i < 2 * LORE_SYMBYTES; i++) kr[i] = 0;
     return 0;
 }

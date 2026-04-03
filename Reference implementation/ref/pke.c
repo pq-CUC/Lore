@@ -37,7 +37,7 @@ int crypto_pke_encrypt(unsigned char *ct,
                        const unsigned char *m,
                        unsigned long long mlen,
                        const unsigned char *pk) {
-    if (mlen != LORE_SYMBYTES) {
+    if (mlen != LORE_MSG_BYTES) {
         return -1; // Message length must be 32 bytes
     }
 
@@ -65,7 +65,7 @@ int crypto_pke_decrypt(unsigned char *m,
                        const unsigned char *ct,
                        const unsigned char *sk) {
     indcpa_dec(m, ct, sk);
-    *mlen = LORE_SYMBYTES;
+    *mlen = LORE_MSG_BYTES;
     return 0;
 }
 

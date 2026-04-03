@@ -18,15 +18,13 @@
 * - const poly_crt_vec *b_ntt:   pointer to the polynomial vector b in NTT domain
 **************************************************/
 static void pack_pk_ntt(unsigned char *r, const unsigned char *seedA, const poly_crt_vec *b_ntt) {
-    // 1. Copy seedA
+
     memcpy(r, seedA, LORE_SYMBYTES);
     unsigned char *main_ptr = r + LORE_SYMBYTES;
     
-    // 2. Prepare a temporary buffer large enough to collect all overflow bits
     unsigned char overflow_buf_all[LORE_K * LORE_N / 8 + 2] = {0};
     size_t total_overflow_bits = 0;
 
-    // 3. Process K polynomials sequentially
     for (int i = 0; i < LORE_K; i++) {
         unsigned char temp_overflow_buf[LORE_N / 8 + 2] = {0};
         size_t bits_written = lore_poly_pack_q_split(main_ptr, temp_overflow_buf, &b_ntt->vec[i].q_poly);
@@ -42,11 +40,11 @@ static void pack_pk_ntt(unsigned char *r, const unsigned char *seedA, const poly
         main_ptr += LORE_N; 
     }
 
-    // 4. Write all collected overflow bits at once to the end of the main data
-    size_t overflow_byte_len = (total_overflow_bits + 7) / 8;
+    /* Write overflow bits */
+    size_t overflow_byte_len = (total_overflow_bits + 7) / 8;   
     memcpy(main_ptr, overflow_buf_all, overflow_byte_len);
 
-    // 5. Finally, write the T-data
+/* Write T-data */
 #if LORE_R_BITS > 0
     unsigned char *t_ptr = main_ptr + overflow_byte_len;
     size_t t_poly_len = LORE_POLY_COMPRESSED_BYTES_T;
@@ -58,7 +56,15 @@ static void pack_pk_ntt(unsigned char *r, const unsigned char *seedA, const poly
         pack_t_bits(t_ptr, p_t_indices);
         t_ptr += t_poly_len;
     }
+    unsigned char *end_ptr = t_ptr; 
+#else
+    unsigned char *end_ptr = main_ptr + overflow_byte_len; 
 #endif
+
+    size_t bytes_written = end_ptr - r;
+    if (bytes_written < LORE_PUBLICKEYBYTES) {
+        memset(end_ptr, 0, LORE_PUBLICKEYBYTES - bytes_written);
+    }
 }
 
 /*************************************************
@@ -71,11 +77,10 @@ static void pack_pk_ntt(unsigned char *r, const unsigned char *seedA, const poly
 * - const unsigned char *pk:  pointer to the input byte array
 **************************************************/
 static void unpack_pk_ntt(poly_crt_vec *b_ntt, unsigned char *seedA, const unsigned char *pk) {
-    // 1. Copy seedA
+
     memcpy(seedA, pk, LORE_SYMBYTES);
     const unsigned char *ptr = pk + LORE_SYMBYTES;
-    
-    // 2. [CORE] Scan the main data area to calculate the total number of overflow bits
+
     size_t main_data_len = LORE_K * LORE_N;
     size_t total_overflow_bits = 0;
     for(size_t i = 0; i < main_data_len; ++i) {
@@ -84,102 +89,134 @@ static void unpack_pk_ntt(poly_crt_vec *b_ntt, unsigned char *seedA, const unsig
         }
     }
     
-    // 3. Precisely locate the pointers for each data section
     const unsigned char *main_ptr = ptr;
     const unsigned char *overflow_ptr = ptr + main_data_len;
 
     int overflow_bit_pos = 0;
 
-    // 4. Unpack Q-data
     for (int i = 0; i < LORE_K; i++) {
         lore_poly_unpack_q_split(&b_ntt->vec[i].q_poly, main_ptr + (i * LORE_N), overflow_ptr, &overflow_bit_pos);
     }
 
-    // 5. Unpack T-data
 #if LORE_R_BITS > 0
     size_t overflow_byte_len = (total_overflow_bits + 7) / 8;
-    const unsigned char *t_ptr = overflow_ptr + overflow_byte_len; // <--- Correct starting address for T-data
+    const unsigned char *t_ptr = overflow_ptr + overflow_byte_len; 
     size_t t_poly_len = LORE_POLY_COMPRESSED_BYTES_T;
     for (int i = 0; i < LORE_K; i++) {
         uint8_t p_t_indices[LORE_N];
         unpack_t_bits(p_t_indices, t_ptr);
         t_ptr += t_poly_len;
         for (int j = 0; j < LORE_N; ++j) {
-            b_ntt->vec[i].t_poly.coeffs[j] = (int16_t)(3 * p_t_indices[j] + 1);
+            b_ntt->vec[i].t_poly.coeffs[j] = (int16_t)(2 * p_t_indices[j]);
         }
     }
 #else
     for (int i = 0; i < LORE_K; i++) {
         for (int j = 0; j < LORE_N; j++) {
-            b_ntt->vec[i].t_poly.coeffs[j] = 1;
+            b_ntt->vec[i].t_poly.coeffs[j] = 0;
         }
     }
 #endif
 }
+
+
 /*************************************************
 * Name:        pack_sk
 *
-* Description: Packs the secret key into a byte array.
+* Description: Packs the secret key into a byte array with lossless compression.
 *
-* Arguments:   - unsigned char *r:             pointer to the output byte array
-* - const poly_sparse *s_t_sparse: pointer to the sparse t-part of the secret key
-* - const poly_crt_vec *s_crt_ntt: pointer to the CRT form of the secret key in NTT domain
+* Arguments:   - unsigned char *r:          pointer to output byte array
+* - const poly_sparse *s_t_sparse: pointer to input sparse T-ring
+* - const poly_crt_vec *s_crt_ntt: pointer to input secret vector
 **************************************************/
 static void pack_sk(unsigned char *r, const poly_sparse *s_t_sparse, const poly_crt_vec *s_crt_ntt) {
     unsigned char *ptr = r;
-
-    // 1. First, pack all n_coeffs
     for(int i = 0; i < LORE_K; i++) {
         memcpy(ptr, &s_t_sparse[i].n_coeffs, sizeof(int16_t));
         ptr += sizeof(int16_t);
     }
-
-    // 2. Then, pack all valid pos and val pairs
     for (int i = 0; i < LORE_K; i++) {
-        memcpy(ptr, s_t_sparse[i].pos, (size_t)s_t_sparse[i].n_coeffs * sizeof(uint8_t));
-        ptr += (size_t)s_t_sparse[i].n_coeffs * sizeof(uint8_t);
-        memcpy(ptr, s_t_sparse[i].val, (size_t)s_t_sparse[i].n_coeffs * sizeof(int8_t));
-        ptr += (size_t)s_t_sparse[i].n_coeffs * sizeof(int8_t);
+        size_t pos_size = (size_t)s_t_sparse[i].n_coeffs * sizeof(s_t_sparse[i].pos[0]);
+        size_t val_size = (size_t)s_t_sparse[i].n_coeffs * sizeof(s_t_sparse[i].val[0]);
+        memcpy(ptr, s_t_sparse[i].pos, pos_size);
+        ptr += pos_size;
+        memcpy(ptr, s_t_sparse[i].val, val_size);
+        ptr += val_size;
     }
 
-    // 3. Finally, pack the q polynomials
+    unsigned char *main_ptr = ptr;
+    unsigned char overflow_buf_all[LORE_K * LORE_N / 8 + 2] = {0};
+    size_t total_overflow_bits = 0;
+
     for (int i = 0; i < LORE_K; i++) {
-        memcpy(ptr, s_crt_ntt->vec[i].q_poly.coeffs, LORE_POLY_BYTES);
-        ptr += LORE_POLY_BYTES;
+        unsigned char temp_overflow_buf[LORE_N / 8 + 2] = {0};
+        size_t bits_written = lore_poly_pack_q_split(main_ptr, temp_overflow_buf, &s_crt_ntt->vec[i].q_poly);
+        
+        for (size_t k = 0; k < bits_written; k++) {
+            if ((temp_overflow_buf[k / 8] >> (k % 8)) & 1) {
+                size_t final_bit_pos = total_overflow_bits + k;
+                overflow_buf_all[final_bit_pos / 8] |= (unsigned char)(1 << (final_bit_pos % 8));
+            }
+        }
+        total_overflow_bits += bits_written;
+        main_ptr += LORE_N; 
+    }
+
+    size_t overflow_byte_len = (total_overflow_bits + 7) / 8;
+    memcpy(main_ptr, overflow_buf_all, overflow_byte_len);
+
+    unsigned char *end_ptr = main_ptr + overflow_byte_len;
+    size_t bytes_written = end_ptr - r;
+    if (bytes_written < LORE_SECRETKEYBYTES) {
+        memset(end_ptr, 0, LORE_SECRETKEYBYTES - bytes_written);
     }
 }
-
 
 /*************************************************
 * Name:        unpack_sk
 *
 * Description: Unpacks the secret key from a byte array.
 *
-* Arguments:   - poly_crt_vec *s_crt_ntt_q:  pointer to the output CRT form of the secret key (q-part)
-* - poly_sparse *s_t_sparse:    pointer to the output sparse t-part of the secret key
-* - const unsigned char *sk:    pointer to the input byte array
+* Arguments:   - poly_crt_vec *s_crt_ntt_q: pointer to output secret vector
+* - poly_sparse *s_t_sparse:   pointer to output sparse T-ring
+* - const unsigned char *sk:   pointer to input byte array
 **************************************************/
 static void unpack_sk(poly_crt_vec *s_crt_ntt_q, poly_sparse *s_t_sparse, const unsigned char *sk) {
     const unsigned char *ptr = sk;
-
-    // 1. First, unpack all n_coeffs
     for(int i = 0; i < LORE_K; i++) {
         memcpy(&s_t_sparse[i].n_coeffs, ptr, sizeof(int16_t));
         ptr += sizeof(int16_t);
     }
-
-    // 2. Then, unpack all valid pos and val pairs
     for (int i = 0; i < LORE_K; i++) {
-        memcpy(s_t_sparse[i].pos, ptr, (size_t)s_t_sparse[i].n_coeffs * sizeof(uint8_t));
-        ptr += (size_t)s_t_sparse[i].n_coeffs * sizeof(uint8_t);
-        memcpy(s_t_sparse[i].val, ptr, (size_t)s_t_sparse[i].n_coeffs * sizeof(int8_t));
-        ptr += (size_t)s_t_sparse[i].n_coeffs * sizeof(int8_t);
+        size_t pos_size = (size_t)s_t_sparse[i].n_coeffs * sizeof(s_t_sparse[i].pos[0]);
+        size_t val_size = (size_t)s_t_sparse[i].n_coeffs * sizeof(s_t_sparse[i].val[0]);
+        memcpy(s_t_sparse[i].pos, ptr, pos_size);
+        ptr += pos_size;
+        memcpy(s_t_sparse[i].val, ptr, val_size);
+        ptr += val_size;
     }
 
-    // 3. Finally, unpack the q polynomials
+    size_t main_data_len = LORE_K * LORE_N;
+    size_t total_overflow_bits = 0;
+    // Pre-scan main buffer to calculate overflow bits.
+    for(size_t i = 0; i < main_data_len; ++i) {
+        if (ptr[i] == 0xFF) {
+            total_overflow_bits++;
+        }
+    }
+
+    const unsigned char *main_ptr = ptr;
+    const unsigned char *overflow_ptr = ptr + main_data_len;
+    int overflow_bit_pos = 0;
+
     for (int i = 0; i < LORE_K; i++) {
-        memcpy(s_crt_ntt_q->vec[i].q_poly.coeffs, ptr, LORE_POLY_BYTES);
-        ptr += LORE_POLY_BYTES;
+        lore_poly_unpack_q_split(&s_crt_ntt_q->vec[i].q_poly, main_ptr + (i * LORE_N), overflow_ptr, &overflow_bit_pos);
+        
+        // Reconstruct dense representation of T-ring.
+        memset(s_crt_ntt_q->vec[i].t_poly.coeffs, 0, LORE_POLY_BYTES);
+        for (int j = 0; j < s_t_sparse[i].n_coeffs; j++) {
+            s_crt_ntt_q->vec[i].t_poly.coeffs[s_t_sparse[i].pos[j]] = s_t_sparse[i].val[j];
+        }
     }
 }
 
@@ -194,10 +231,11 @@ static void unpack_sk(poly_crt_vec *s_crt_ntt_q, poly_sparse *s_t_sparse, const 
 **************************************************/
 static void pack_ciphertext_ntt(unsigned char *r, const poly_crt_vec *cu_ntt, const poly_crt *cv_crt) {
     unsigned char *main_ptr = r;
-    unsigned char overflow_buf_all[((LORE_K + 1) * LORE_N + 7) / 8 + 2] = {0};
+    // Collect overflow bits for Cu.
+    unsigned char overflow_buf_all[(LORE_K * LORE_N + 7) / 8 + 2] = {0}; 
     size_t total_overflow_bits = 0;
     
-    // 1. Pack K cu polynomials
+
     for(int i = 0; i < LORE_K; ++i) {
         unsigned char temp_overflow_buf[LORE_N / 8 + 2] = {0};
         size_t bits_written = lore_poly_pack_q_split(main_ptr, temp_overflow_buf, &cu_ntt->vec[i].q_poly);
@@ -211,36 +249,40 @@ static void pack_ciphertext_ntt(unsigned char *r, const poly_crt_vec *cu_ntt, co
         total_overflow_bits += bits_written;
         main_ptr += LORE_N;
     }
-    
-    // 2. Pack 1 cv polynomial
-    unsigned char temp_overflow_buf_cv[LORE_N / 8 + 2] = {0};
-    size_t bits_written_cv = lore_poly_pack_q_split(main_ptr, temp_overflow_buf_cv, &cv_crt->q_poly);
-    for (size_t k = 0; k < bits_written_cv; k++) {
-        if ((temp_overflow_buf_cv[k / 8] >> (k % 8)) & 1) {
-            size_t final_bit_pos = total_overflow_bits + k;
-            overflow_buf_all[final_bit_pos / 8] |= (unsigned char)(1 << (final_bit_pos % 8));
-        }
-    }
-    total_overflow_bits += bits_written_cv;
-    main_ptr += LORE_N;
 
-    // 3. Write the total overflow data
     size_t overflow_byte_len = (total_overflow_bits + 7) / 8;
     memcpy(main_ptr, overflow_buf_all, overflow_byte_len);
+    unsigned char *ptr = main_ptr + overflow_byte_len;
 
-    // 4. Write T-data
 #if LORE_R_BITS > 0
-    unsigned char* t_ptr = main_ptr + overflow_byte_len;
     size_t t_poly_len = LORE_POLY_COMPRESSED_BYTES_T;
     for(int i = 0; i < LORE_K; ++i) {
         uint8_t t_indices[LORE_N];
         for(int j = 0; j < LORE_N; ++j) {
             t_indices[j] = (uint8_t)find_closest_r_idx(cu_ntt->vec[i].t_poly.coeffs[j]);
         }
-        pack_t_bits(t_ptr, t_indices);
-        t_ptr += t_poly_len;
+        pack_t_bits(ptr, t_indices);
+        ptr += t_poly_len;
     }
 #endif
+
+
+    memset(ptr, 0, (LORE_N * LORE_L + 7) / 8);
+    for (int j = 0; j < LORE_N; ++j) {
+        uint16_t val = cv_crt->q_poly.coeffs[j] & ((1 << LORE_L) - 1);
+        size_t bit_idx = j * LORE_L;
+        ptr[bit_idx / 8] |= (val << (bit_idx % 8));
+    }
+    ptr += (LORE_N * LORE_L + 7) / 8;
+
+
+    memset(ptr, 0, (LORE_N * LORE_T_BITS + 7) / 8);
+    for (int j = 0; j < LORE_N; ++j) {
+        uint16_t val = cv_crt->t_poly.coeffs[j] & ((1 << LORE_T_BITS) - 1);
+        size_t bit_idx = j * LORE_T_BITS;
+        ptr[bit_idx / 8] |= (val << (bit_idx % 8));
+    }
+    ptr += (LORE_N * LORE_T_BITS + 7) / 8;
 }
 
 /*************************************************
@@ -252,64 +294,71 @@ static void pack_ciphertext_ntt(unsigned char *r, const poly_crt_vec *cu_ntt, co
 * - poly_crt *cv:             pointer to the output polynomial cv
 * - const unsigned char *c:   pointer to the input byte array
 **************************************************/
-static void unpack_ciphertext_ntt(poly_crt_vec *cu_ntt, poly_crt *cv, const unsigned char *c) {
-    // 1. The main data area of the ciphertext contains cu (K polynomials) and cv (1 polynomial)
-    size_t main_data_len = (LORE_K + 1) * LORE_N;
+static void unpack_ciphertext_ntt(poly_crt_vec *cu_ntt, poly_crt *cv_crt, const unsigned char *c) {
+
+    size_t main_data_len = LORE_K * LORE_N;
     size_t total_overflow_bits = 0;
     for(size_t i = 0; i < main_data_len; ++i) {
-        if (c[i] == 0xFF) {
-            total_overflow_bits++;
-        }
+        if (c[i] == 0xFF) total_overflow_bits++;
     }
 
-    // 2. Determine the correct pointers for each data section
     const unsigned char *main_ptr = c;
     const unsigned char *overflow_ptr = c + main_data_len;
+    int overflow_bit_pos = 0;
 
-    int overflow_bit_pos = 0; // Used to track the bit position in the overflow stream
-
-    // Unpack the q-part of K cu polynomials
     for (int i = 0; i < LORE_K; i++) {
         lore_poly_unpack_q_split(&cu_ntt->vec[i].q_poly, main_ptr + (i * LORE_N), overflow_ptr, &overflow_bit_pos);
     }
-    // Unpack the q-part of the cv polynomial
-    lore_poly_unpack_q_split(&cv->q_poly, main_ptr + (LORE_K * LORE_N), overflow_ptr, &overflow_bit_pos);
 
-    // 3. Unpack t-poly from the correct position
-#if LORE_R_BITS > 0
     size_t overflow_byte_len = (total_overflow_bits + 7) / 8;
-    const unsigned char *t_ptr = overflow_ptr + overflow_byte_len; 
-    size_t t_poly_len = LORE_POLY_COMPRESSED_BYTES_T; // This macro is defined in params.h
+    const unsigned char *ptr = overflow_ptr + overflow_byte_len;
+
+#if LORE_R_BITS > 0
+    size_t t_poly_len = LORE_POLY_COMPRESSED_BYTES_T;
     for (int i = 0; i < LORE_K; i++) {
         uint8_t t_indices[LORE_N];
-        unpack_t_bits(t_indices, t_ptr);
-        t_ptr += t_poly_len;
+        unpack_t_bits(t_indices, ptr);
+        ptr += t_poly_len;
         for(int j=0; j<LORE_N; ++j){
-            cu_ntt->vec[i].t_poly.coeffs[j] = (int16_t)(3 * t_indices[j] + 1);
+            cu_ntt->vec[i].t_poly.coeffs[j] = (int16_t)(2 * t_indices[j] );
         }
     }
 #else
     for(int i=0; i<LORE_K; ++i) {
-        for(int j=0; j<LORE_N; ++j){
-            cu_ntt->vec[i].t_poly.coeffs[j] = 1;
-        }
+        for(int j=0; j<LORE_N; ++j) cu_ntt->vec[i].t_poly.coeffs[j] = 0;
     }
 #endif
 
-    // The t-part of cv is fixed, this logic remains unchanged
-    const int16_t r0 = (LORE_T - 1) / 2;
-    for (int i = 0; i < LORE_N; ++i) {
-        cv->t_poly.coeffs[i] = r0;
+    // Unpack x'_q of Cv and recover x''_q via Algorithm 6.
+    for (int j = 0; j < LORE_N; ++j) {
+        size_t bit_idx = j * LORE_L;
+        uint16_t x_q_prime = (ptr[bit_idx / 8] >> (bit_idx % 8)) & ((1 << LORE_L) - 1);
+        
+        // Decompression_c: x''_q = round(q * x'_q / 2^l) mod q
+        int32_t x_q_prime_prime = ((x_q_prime * LORE_Q) + (1 << (LORE_L - 1))) >> LORE_L;
+        cv_crt->q_poly.coeffs[j] = barrett_reduce((int16_t)x_q_prime_prime);
     }
-    poly_reduce(&cv->q_poly);
+    ptr += (LORE_N * LORE_L + 7) / 8;
+
+
+    
+    for (int j = 0; j < LORE_N; ++j) {
+        size_t bit_idx = j * LORE_T_BITS;
+        uint16_t x_t_prime = (ptr[bit_idx / 8] >> (bit_idx % 8)) & ((1 << LORE_T_BITS) - 1);
+        cv_crt->t_poly.coeffs[j] = (int16_t)x_t_prime;
+    }
+    ptr += (LORE_N * LORE_T_BITS + 7) / 8;
+    
 }
-
-
 /*************************************************
 * Name:        indcpa_keypair_derand
 *
 * Description: Deterministically generates IND-CPA public and private key.
 * All randomness is derived from the input coins.
+*
+* Arguments:   - unsigned char *pk: pointer to output public key
+* - unsigned char *sk: pointer to output secret key
+* - const unsigned char *coins: pointer to input randomness (32 bytes)
 **************************************************/
 void indcpa_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned char *coins)
 {
@@ -338,17 +387,14 @@ void indcpa_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned 
     #endif
     }
 
-    // (后续的舍入和打包逻辑保持不变)
     for(int i=0; i<LORE_K; ++i){
         poly delta_q_std;
         poly t_poly_orig = b_final.vec[i].t_poly;
         for(int j=0; j<LORE_N; ++j){
             int16_t x_t = t_poly_orig.coeffs[j];
             int16_t r_idx = find_closest_r_idx(x_t);
-            int16_t r_val =(int16_t)( 3 * r_idx + 1);
-            int16_t delta_val = r_val - x_t;
-            while (delta_val > LORE_T / 2) delta_val -= LORE_T;
-            while (delta_val <= -LORE_T / 2) delta_val += LORE_T;
+            int16_t r_val =(int16_t)( 2 * r_idx );
+            int16_t delta_val = sym_mod(r_val - x_t, LORE_T);
             delta_q_std.coeffs[j] = delta_val;
         }
 
@@ -357,7 +403,7 @@ void indcpa_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned 
 
         for(int j=0; j<LORE_N; ++j){
             int16_t r_idx = find_closest_r_idx(t_poly_orig.coeffs[j]);
-            b_final.vec[i].t_poly.coeffs[j] =(int16_t)( 3 * r_idx + 1);
+            b_final.vec[i].t_poly.coeffs[j] =(int16_t)( 2 * r_idx );
         }
     }
 
@@ -369,7 +415,9 @@ void indcpa_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned 
 * Name:        indcpa_keypair
 *
 * Description: Randomly generates IND-CPA public and private key.
-* (This is now a wrapper around the deterministic version)
+*
+* Arguments:   - unsigned char *pk: pointer to output public key
+* - unsigned char *sk: pointer to output secret key
 **************************************************/
 void indcpa_keypair(unsigned char *pk, unsigned char *sk)
 {
@@ -404,7 +452,9 @@ void indcpa_enc(unsigned char *c,
     unsigned char seedA[LORE_SYMBYTES];
 
     unpack_pk_ntt(&b_ntt, seedA, pk);
-    gen_matrix_ntt(at_ntt, seedA, 1); // Directly and efficiently generate the transpose matrix A^T
+
+    /* Generate transpose matrix A^T */
+    gen_matrix_ntt(at_ntt, seedA, 1); 
 
     poly_getnoise(&sp_crt, sp_t_sparse, (unsigned char*)coins, 0);
 
@@ -412,10 +462,10 @@ void indcpa_enc(unsigned char *c,
 
     for (int i = 0; i < LORE_K; i++) {
     #if LORE_LEVEL == 1
-        // Level 1: Sparse multiplication is faster, keep as is
+        // Level 1: Sparse multiplication.
         poly_crt_vec_pointwise_acc_montgomery_sparse(&cu_final.vec[i], &at_ntt[i], &sp_crt, sp_t_sparse);
     #else
-        // Level 2 & 3: The dense form of s' is available, call the dense multiplication function directly to avoid conversion
+        // Level 2, 3, 4: Dense multiplication.
         poly_crt_vec_pointwise_acc_montgomery(&cu_final.vec[i], &at_ntt[i], &sp_crt);
     #endif
     }
@@ -426,10 +476,8 @@ void indcpa_enc(unsigned char *c,
         for(int j=0; j<LORE_N; ++j){
             int16_t x_t = t_poly_orig.coeffs[j];
             int16_t r_idx = find_closest_r_idx(x_t);
-            int16_t r_val = (int16_t)(3 * r_idx + 1);
-            int16_t delta_val = r_val - x_t;
-            while (delta_val > LORE_T / 2) delta_val -= LORE_T;
-            while (delta_val <= -LORE_T / 2) delta_val += LORE_T;
+            int16_t r_val = (int16_t)(2 * r_idx);
+            int16_t delta_val = sym_mod(r_val - x_t, LORE_T);
             delta_q_std.coeffs[j] = delta_val;
         }
         
@@ -438,7 +486,7 @@ void indcpa_enc(unsigned char *c,
 
         for(int j=0; j<LORE_N; ++j){
              int16_t r_idx = find_closest_r_idx(t_poly_orig.coeffs[j]);
-             cu_final.vec[i].t_poly.coeffs[j] = (int16_t)(3 * r_idx + 1);
+             cu_final.vec[i].t_poly.coeffs[j] = (int16_t)(2 * r_idx);
         }
     }
 
@@ -448,40 +496,48 @@ void indcpa_enc(unsigned char *c,
     for (int i = 0; i < LORE_N; ++i) {
         cv_crt.q_poly.coeffs[i] = montgomery_reduce((int64_t)cv_crt.q_poly.coeffs[i]);
     }
+
+
+
     poly_getnoise_uniform(&e_pp, LORE_T, coins, (unsigned char)LORE_K);
     for (int i = 0; i < LORE_N; ++i) {
         cv_crt.q_poly.coeffs[i] = barrett_reduce(cv_crt.q_poly.coeffs[i] + e_pp.coeffs[i]);
-        int16_t t_coeff = (int16_t)((cv_crt.t_poly.coeffs[i] + e_pp.coeffs[i]) % LORE_T);
-        if (t_coeff > LORE_T / 2) t_coeff -= LORE_T;
-        if (t_coeff < -(LORE_T / 2)) t_coeff += LORE_T;
-        cv_crt.t_poly.coeffs[i] = t_coeff;
+        cv_crt.t_poly.coeffs[i] = sym_mod(cv_crt.t_poly.coeffs[i] + e_pp.coeffs[i], LORE_T);
     }
 
     poly msg_poly;
     poly_encode_msg(&msg_poly, m);
     poly_add_scaled_msg(&cv_crt, &msg_poly);
 
-    // ======================== Start of fix ========================
-    // Create a new poly_crt struct to hold the corrected cv data
-    poly_crt cv_final_to_pack;
-
-    // This is the core logic of lore_compress_cv_q
-    const int16_t r0 = (LORE_T - 1) / 2;
     for (int i = 0; i < LORE_N; ++i) {
-        int16_t x_q = cv_crt.q_poly.coeffs[i];
-        int16_t x_t = cv_crt.t_poly.coeffs[i];
-        int16_t delta = r0 - x_t;
-        while (delta > LORE_T / 2) delta -= LORE_T;
-        while (delta <= -LORE_T / 2) delta += LORE_T;
-        // Store the corrected q-poly coefficients in the new struct
-        cv_final_to_pack.q_poly.coeffs[i] = (int16_t)(x_q + delta + LORE_Q) % LORE_Q;
-    }
-    // The t-poly part is not passed to the packing function, but we copy it for completeness
-    cv_final_to_pack.t_poly = cv_crt.t_poly;
 
-    // Pass the corrected cv_final_to_pack (not the original cv_crt) to the packing function
-    pack_ciphertext_ntt(c, &cu_final, &cv_final_to_pack);
-    // ======================== End of fix ========================
+        int32_t x_q = cv_crt.q_poly.coeffs[i] % LORE_Q;
+        x_q += (x_q >> 31) & LORE_Q;
+        
+        int32_t x_t = cv_crt.t_poly.coeffs[i] % LORE_T;
+        x_t += (x_t >> 31) & LORE_T;
+
+        // x'_q = round(2^l * x_q / q) mod 2^l
+        int32_t x_q_prime = ((x_q << LORE_L) + (LORE_Q >> 1)) / LORE_Q;
+        x_q_prime &= ((1 << LORE_L) - 1); 
+
+        int32_t x_q_prime_prime = ((x_q_prime * LORE_Q) + (1 << (LORE_L - 1))) >> LORE_L;
+        x_q_prime_prime %= LORE_Q;
+        x_q_prime_prime += (x_q_prime_prime >> 31) & LORE_Q;
+
+
+        int32_t delta_q = sym_mod(x_q_prime_prime - x_q, LORE_Q);
+        // Compensate truncation error to T-ring.
+        int32_t x_t_prime = (x_t + delta_q) % LORE_T;
+        x_t_prime += (x_t_prime >> 31) & LORE_T;
+
+        cv_crt.q_poly.coeffs[i] = (int16_t)x_q_prime;
+        cv_crt.t_poly.coeffs[i] = (int16_t)x_t_prime;
+    }
+
+    // Pack the compressed ciphertext components.
+    pack_ciphertext_ntt(c, &cu_final, &cv_crt);
+
 }
 
 /*************************************************
@@ -500,12 +556,14 @@ void indcpa_dec(unsigned char *m,
     poly_crt_vec cu_ntt;
     poly_crt cv_crt, s_dot_cu;
 
-    poly_crt_vec s_crt; // s_crt will be directly generated by the new unpack_sk
-    poly_sparse s_t_sparse[LORE_K]; // New: for storing the unpacked sparse t-part
+    poly_crt_vec s_crt;             
+    poly_sparse s_t_sparse[LORE_K]; 
 
 
     unpack_ciphertext_ntt(&cu_ntt, &cv_crt, c);
+
     unpack_sk(&s_crt, s_t_sparse, sk);
+
 
     poly_crt_vec_pointwise_acc_montgomery_sparse(&s_dot_cu, (const poly_crt_vec*)&cu_ntt, &s_crt, s_t_sparse);
 

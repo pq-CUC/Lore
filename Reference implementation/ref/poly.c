@@ -9,9 +9,49 @@
 #include "reduce.h"
 #include "sampler.h"
 #include "symmetric.h"
-#include "lore_luts.h" 
 #include "toomcook.h"
+#include "bch_codec.h"
 
+/*************************************************
+* Name:        center_mod_257
+*
+* Description: 32-bit branchless centered reduction optimized for Q=257.
+* Reduces a 32-bit integer to the range [-128, 128].
+*
+* Arguments:   - int32_t x: the input 32-bit integer to be reduced
+*
+* Returns:     the centered reduced 16-bit integer
+**************************************************/
+static inline int16_t center_mod_257(int32_t x) {
+    // Fast reduction using Fermat prime property.
+    int32_t t = (x & 255) - (x >> 8); 
+    t = (t & 255) - (t >> 8);         
+
+    // Map to [-128, 128]
+    t += (t >> 31) & 257;             
+
+    t -= (((128 - t) >> 31) & 257);   
+    
+    return (int16_t)t;
+}
+
+
+#if LORE_LEVEL > 1
+static struct bch_control *lore_bch_ctx = NULL;
+/*************************************************
+* Name:        ensure_bch_init
+*
+* Description: Initializes the BCH codec context dynamically if it has 
+* not been initialized yet.
+*
+* Arguments:   None
+**************************************************/
+static void ensure_bch_init() {
+    if (lore_bch_ctx == NULL) {
+        lore_bch_ctx = init_bch(LORE_BCH_M, LORE_BCH_T, 0);
+    }
+}
+#endif
 /*************************************************
 * Name:        poly_from_sparse
 *
@@ -38,16 +78,33 @@ void poly_from_sparse(poly *r, const poly_sparse *s) {
 * - const poly *b: pointer to the second polynomial
 **************************************************/
 void poly_add_modt(poly *r, const poly *a, const poly *b) {
-    for(int j=0; j<LORE_N; ++j) {
-        int16_t sum = a->coeffs[j] + b->coeffs[j];
-        sum %= LORE_T;
-        if (sum > LORE_T / 2) {
-            sum -= LORE_T;
+    // SWAR processing: 4-way parallel arithmetic.
+    uint64_t *r64 = (uint64_t *)r->coeffs;
+    const uint64_t *a64 = (const uint64_t *)a->coeffs;
+    const uint64_t *b64 = (const uint64_t *)b->coeffs;
+
+   // Parallel mask setup.
+    uint64_t mask = (LORE_T == 4) ? 0x0003000300030003ULL : 0x0001000100010001ULL;
+
+    for(int j = 0; j < LORE_N / 4; ++j) {
+        // Parallel addition without overflow risk.
+        uint64_t sum = a64[j] + b64[j];
+        
+        uint64_t val = sum & mask; 
+
+        if (LORE_T == 4) {
+            // Branchless centering for T=4: map 3 to -1.
+            
+            uint64_t bit0 = val & 0x0001000100010001ULL;
+            uint64_t bit1 = (val >> 1) & 0x0001000100010001ULL;
+            
+            uint64_t cond = bit0 & bit1; 
+            
+            r64[j] = val - (cond << 2);
+        } else {
+            // For T=2, result requires no shift.
+            r64[j] = val;
         }
-        while (sum < -(LORE_T / 2)) {
-            sum += LORE_T;
-        }
-        r->coeffs[j] = sum;
     }
 }
 
@@ -64,51 +121,29 @@ void poly_add_modt(poly *r, const poly *a, const poly *b) {
 * - const poly_sparse *b_sparse: pointer to the sparse polynomial B
 **************************************************/
 void poly_sparse_mul_modt(poly *r, const poly *a_dense, const poly_sparse *b_sparse) {
-    int32_t c_tmp[2 * LORE_N] = {0}; // Use a 32-bit temporary accumulator
+    int32_t c_tmp[2 * LORE_N] = {0}; 
     
-    // 1. Accumulate products
     for (int i = 0; i < b_sparse->n_coeffs; i++) {
-        uint8_t degree = b_sparse->pos[i];
-        int8_t  value  = b_sparse->val[i];
+        uint16_t degree = b_sparse->pos[i]; 
+        int16_t  value  = b_sparse->val[i]; 
+
+        if (degree >= LORE_N) continue; 
         
         for (int j = 0; j < LORE_N; j++) {
-            // Core operation: c[deg+j] += a[j] * value
             c_tmp[degree + j] += (int32_t)a_dense->coeffs[j] * value;
         }
     }
     
-    // 2. Ring reduction (mod x^n+1) and mod t reduction
     for (int j = 0; j < LORE_N; j++) {
-        // c[j] = c[j] - c[n+j]
         int32_t final_val = c_tmp[j] - c_tmp[LORE_N + j];
 
-    #if LORE_LEVEL == 1
-        // mod 3 (Level 1): use mod 3 sparse multiplication table
-        r->coeffs[j] = LORE_MOD_T_SPARSE(final_val);
-    #elif LORE_LEVEL == 2
-        // mod 7 (Level 2): use mod 7 sparse multiplication table (activate new table)
-        r->coeffs[j] = LORE_MOD_T_SPARSE(final_val);
-    #else
-        // LORE_LEVEL == 3: Manually inline Barrett reduction for extreme performance
-        // Pre-calculated "magic number" M = floor(2^35 / 13)
-        const int64_t M = 2643056797;
+        int16_t val = (int16_t)(final_val & (LORE_T - 1));
         
-        // a * M >> 35 is an excellent approximation of a / 13
-        int32_t q = (int32_t)(((int64_t)final_val * M) >> 35);
+        if (LORE_T == 4) {
+            val -= ((val >> 1) & (val & 1)) << 2;
+        }
         
-        // **Correction**: Rename local variable 'r' to 'reduced_val'
-        int32_t reduced_val = final_val - q * 13;
-        
-        // Correction step 1: Ensure remainder is in the range [0, 12]
-        if (reduced_val >= 13) reduced_val -= 13;
-        if (reduced_val < 0) reduced_val += 13;
-
-        // Correction step 2: Center the result to [-6, 6]
-        if (reduced_val > 6) reduced_val -= 13;
-
-        // **Correction**: Assign the correct result to the correct variable
-        r->coeffs[j] = (int16_t)reduced_val;
-    #endif
+        r->coeffs[j] = val;
     }
 }
 
@@ -156,35 +191,22 @@ void poly_crt_combine(poly *r, const poly_crt *pc) {
     const int16_t q_inv_t = inv(LORE_Q, LORE_T);
 
     for (int i = 0; i < LORE_N; ++i) {
-        // a_q and a_t are centered coefficients
+
         int16_t a_q = pc->q_poly.coeffs[i];
         int16_t a_t = pc->t_poly.coeffs[i];
-        
-        // We need to find x such that:
-        // x ≡ a_q (mod Q)
-        // x ≡ a_t (mod T)
 
-        // Step 1: Convert coefficients to the standard [0, n-1] range
         int32_t a_q_std = a_q;
-        if (a_q_std < 0) a_q_std += LORE_Q;
+        a_q_std += (a_q_std >> 31) & LORE_Q;
         
         int32_t a_t_std = a_t;
-        if (a_t_std < 0) a_t_std += LORE_T;
+        a_t_std += (a_t_std >> 31) & LORE_T;
         
-        // Step 2: Apply the standard Garner's CRT algorithm
-        // x has the form x = a_q_std + k*Q
-        // We need to solve for k
-        // a_q_std + k*Q ≡ a_t_std (mod T)
-        // k*Q ≡ a_t_std - a_q_std (mod T)
-        // k ≡ (a_t_std - a_q_std) * q_inv_t (mod T)
+        /* Apply Garner's CRT algorithm to reconstruct the coefficient */
 
-        int32_t h = a_t_std - a_q_std;
-        h %= LORE_T;
-        if (h < 0) h += LORE_T;
-
-        h = (h * q_inv_t) % LORE_T;
+        int32_t h = (a_t_std - a_q_std) & (LORE_T - 1);
+        h = (h * q_inv_t) & (LORE_T - 1);
         
-        // Step 3: Reconstruct the final result
+        /*  Reconstruct the final result*/
         int32_t result = a_q_std + (int32_t)LORE_Q * h;
         r->coeffs[i] = (int16_t)result;
     }
@@ -201,16 +223,11 @@ void poly_crt_decompose(poly_crt *pc, const poly *p) {
     for (int i = 0; i < LORE_N; ++i) {
         pc->q_poly.coeffs[i] = barrett_reduce(p->coeffs[i]);
 
-#if LORE_LEVEL == 1 || LORE_LEVEL == 2
-        // Use lookup table defined for Level 1 or 2
-        pc->t_poly.coeffs[i] = LORE_MOD_T_DECOMPOSE(p->coeffs[i]);
-#else
-        // Level 3 (mod 13) retains the original arithmetic operations
-        int16_t t_coeff = p->coeffs[i] % LORE_T;
-        if (t_coeff > LORE_T / 2) t_coeff -= LORE_T;
-        if (t_coeff < -(LORE_T / 2)) t_coeff += LORE_T;
+        int16_t t_coeff = (int16_t)(p->coeffs[i] & (LORE_T - 1));
+        if (LORE_T == 4) {
+            t_coeff -= ((t_coeff >> 1) & (t_coeff & 1)) << 2;
+        }
         pc->t_poly.coeffs[i] = t_coeff;
-#endif
     }
 }
 
@@ -225,8 +242,13 @@ void poly_crt_decompose(poly_crt *pc, const poly *p) {
 **************************************************/
 void poly_crt_add(poly_crt *r, const poly_crt *a, const poly_crt *b) {
     for (int i = 0; i < LORE_N; ++i) {
-        r->q_poly.coeffs[i] = (int16_t)((a->q_poly.coeffs[i] + b->q_poly.coeffs[i]) % LORE_Q);
-        r->t_poly.coeffs[i] = (int16_t)((a->t_poly.coeffs[i] + b->t_poly.coeffs[i]) % LORE_T);
+        r->q_poly.coeffs[i] = center_mod_257(a->q_poly.coeffs[i] + b->q_poly.coeffs[i]);
+        
+        int16_t t_coeff = (int16_t)((a->t_poly.coeffs[i] + b->t_poly.coeffs[i]) & (LORE_T - 1));
+        if (LORE_T == 4) {
+            t_coeff -= ((t_coeff >> 1) & (t_coeff & 1)) << 2;
+        }
+        r->t_poly.coeffs[i] = t_coeff;
     }
 }
 
@@ -243,9 +265,10 @@ void poly_crt_sub(poly_crt *r, const poly_crt *a, const poly_crt *b) {
     for (int i = 0; i < LORE_N; ++i) {
         r->q_poly.coeffs[i] = barrett_reduce(a->q_poly.coeffs[i] - b->q_poly.coeffs[i]);
 
-        int16_t t_coeff = (int16_t)((a->t_poly.coeffs[i] - b->t_poly.coeffs[i]) % LORE_T);
-        if (t_coeff > LORE_T / 2) t_coeff -= LORE_T;
-        if (t_coeff < -(LORE_T / 2)) t_coeff += LORE_T;
+        int16_t t_coeff = (int16_t)((a->t_poly.coeffs[i] - b->t_poly.coeffs[i]) & (LORE_T - 1));
+        if (LORE_T == 4) {
+            t_coeff -= ((t_coeff >> 1) & (t_coeff & 1)) << 2;
+        }
         r->t_poly.coeffs[i] = t_coeff;
     }
 }
@@ -328,48 +351,29 @@ void poly_getnoise(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, unsigned 
 **************************************************/
 void poly_getnoise_uniform(poly *r, uint16_t t, const unsigned char *seed, unsigned char nonce)
 {
-    // --- Optimization Core: Streamlined Sampling ---
-    // 1. Generate enough random bytes at once.
-    // To handle rejection sampling, we generate slightly more bytes than needed. LORE_N * 2 = 512 bytes is more than enough.
     uint8_t buf[LORE_N * 2];
     prf(buf, sizeof(buf), seed, nonce);
 
-    int ctr = 0; // counter for successfully sampled coefficients
-    unsigned int buf_pos = 0; // current position in the buffer
+    int ctr = 0; 
+    unsigned int buf_pos = 0; 
 
-    // 2. Efficient rejection sampling threshold.
-    // To avoid modular bias, we only accept random bytes that fall within the largest multiple of t.
-    // e.g., for t=7, the threshold limit = floor(256/7)*7 = 36*7 = 252.
-    // Any byte less than 252 can be taken modulo 7 without bias.
-    uint16_t limit = (uint16_t)((0x100 / t) * t);
+    // Direct sampling in [-(t-1)/2, (t-1)/2].
+    int16_t max_val = (t - 1) / 2;
+    int16_t min_val = -max_val;
+    uint16_t range = max_val - min_val + 1; // range=1 when t=2; range=3 when t=4.
+    uint16_t limit = (uint16_t)((0x100 / range) * range);
 
-    // 3. Loop in memory, extracting bytes from the buffer and performing sampling.
     while(ctr < LORE_N) {
-        // If the buffer is exhausted (though nearly impossible in this case), abort as a precaution.
-        if (buf_pos >= sizeof(buf)) {
-            break; 
-        }
-
+        if (buf_pos >= sizeof(buf)) break; 
         uint8_t val = buf[buf_pos++];
         
-        // 4. Perform rejection sampling.
-        // The acceptance rate is very high (e.g., 252/256 ≈ 98.4% for t=7), much faster than external calls.
         if (val < limit) {
-            // Sampling successful, center and assign
-        #if LORE_LEVEL == 1 || LORE_LEVEL == 2
-            // Use lookup table defined for Level 1 or 2
-            // (the table generated by our python script is already centered)
-            r->coeffs[ctr++] = LORE_MOD_T_U8_NOISE(val);
-        #else
-            // Level 3 (mod 13) retains the original arithmetic operations
-            int16_t bound = (int16_t)((t - 1) / 2);
-            // Sampling successful, center and assign
-            r->coeffs[ctr++] = (int16_t)((val % t) - bound);
-        #endif
+            // Ensure zero mean.
+            int16_t t_coeff = (int16_t)(val % range) + min_val;
+            r->coeffs[ctr++] = t_coeff;
         }
     }
 }
-
 /*************************************************
 * Name:        poly_ntt
 *
@@ -397,17 +401,9 @@ void poly_invntt_tomont(poly *r) {
 * Name:        poly_pointwise_montgomery
 *
 * Description: Pointwise multiplication of two polynomials in the NTT domain.
-*
-* Arguments:   - poly *r:       pointer to the output polynomial
-* - const poly *a: pointer to the first input polynomial
-* - const poly *b: pointer to the second input polynomial
 **************************************************/
 void poly_pointwise_montgomery(poly *r, const poly *a, const poly *b) {
-    unsigned int i;
-    for(i=0; i<LORE_N/4; i++) {
-      basemul(&r->coeffs[4*i], &a->coeffs[4*i], &b->coeffs[4*i], zetas[64+i]);
-      basemul(&r->coeffs[4*i+2], &a->coeffs[4*i+2], &b->coeffs[4*i+2], -zetas[64+i]);
-    }
+    poly_mul_ntt(r->coeffs, a->coeffs, b->coeffs);
 }
 
 /*************************************************
@@ -451,61 +447,28 @@ void unpack_t_bits(uint8_t *t_indices, const unsigned char *r) {
 #endif
 
 /*************************************************
-* Name:        find_closest_r_idx (OPTIMIZED VERSION)
+* Name:        find_closest_r_idx
 *
 * Description: Finds the index of the closest value in the set R = {3i+1}
 * to a given coefficient x_t mod t.
-* This version uses a tiny, cache-friendly lookup table.
 *
 * Arguments:   - int16_t x_t: the input coefficient
 *
 * Returns:     the index of the closest value in R
 **************************************************/
 int16_t find_closest_r_idx(int16_t x_t) {
-    #if LORE_R_BITS == 0
-        // Level 1: |R|=1, index is always 0.
-        (void)x_t;
-        return 0;
-
+    #if LORE_T == 4
+        // Extract lower 2 bits. Returns 1 if value is 2.
+        return (x_t & 3) == 2;
     #else
-        // CRITICAL STEP: First, reduce x_t to the centered range [-T/2, T/2],
-        // mimicking the implicit behavior of the original loop's distance calculation.
-        while (x_t > LORE_T / 2) x_t -= LORE_T;
-        while (x_t < -(LORE_T / 2)) x_t += LORE_T;
-
-        #if LORE_LEVEL == 2
-            // Level 2: T=7, R={1, 4}. Centered x_t is in [-3, 3].
-            // Access: lut[x_t + 3]
-            static const int16_t lut_mod7[LORE_T] = {
-                // x_t:     -3, -2, -1,  0,  1,  2,  3
-                // R_idx:
-                           1,  1,  0,  0,  0,  0,  1
-            };
-            return lut_mod7[x_t + 3];
-
-        #elif LORE_LEVEL == 3
-            // Level 3: T=13, R={1, 4, 7, 10}. Centered x_t is in [-6, 6].
-            // Access: lut[x_t + 6]
-            static const int16_t lut_mod13[LORE_T] = {
-                // x_t:     -6, -5, -4, -3, -2, -1,  0,  1,  2,  3,  4,  5,  6
-                // R_idx:
-                           2,  2,  3,  3,  0,  0,  0,  0,  0,  1,  1,  2,  2
-            };
-            return lut_mod13[x_t + 6];
-        #endif
+        // Always returns 0 for T=2.
+        return 0;
     #endif
 }
 
 
 
-
-#if LORE_LEVEL == 3 // t=13
-    static const int16_t Q_INV_T = 4; // inv(257, 13)
-#elif LORE_LEVEL == 2 // t=7
-    static const int16_t Q_INV_T = 3; // inv(257, 7)
-#else // LORE_LEVEL == 1, t=3
-    static const int16_t Q_INV_T = 2; // inv(257, 3)
-#endif
+static const int16_t Q_INV_T = 1;
 
 /*************************************************
 * Name:        poly_decode_msg_crt
@@ -518,44 +481,105 @@ int16_t find_closest_r_idx(int16_t x_t) {
 void poly_decode_msg_crt(unsigned char *msg, const poly_crt *r_crt) {
     const int32_t TQ = LORE_T * LORE_Q;
     const int32_t TQ_HALF = TQ / 2;
-    const int32_t TQ_QUARTER = TQ / 4;
+    memset(msg, 0, LORE_MSG_BYTES);
 
-    memset(msg, 0, LORE_SYMBYTES);
+#if LORE_LEVEL > 1
+    ensure_bch_init();
+    unsigned char recv_codeword[LORE_CODEWORD_BYTES] = {0};
+    int decode_bytes = LORE_CODEWORD_BYTES;
+#endif
 
-    for (int i = 0; i < LORE_N; ++i) {
-        int16_t a_q = r_crt->q_poly.coeffs[i];
-        int16_t a_t = r_crt->t_poly.coeffs[i];
+// ================= Level 1: Repetition Code =================
+#if LORE_LEVEL == 1
+    for (int i = 0; i < LORE_MSG_BYTES; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            int32_t dist_to_0 = 0;
+            int32_t dist_to_1 = 0;
+            
+            for (int k = 0; k < LORE_K_VEC; k++) {
+                int idx = (i * 8 + j) * LORE_K_VEC + k;
+                int32_t a_q = r_crt->q_poly.coeffs[idx];
+                int32_t a_t = r_crt->t_poly.coeffs[idx];
 
-        // Convert centered coefficients back to the standard range [0, m-1]
-        int32_t a_q_std = (a_q < 0) ? (a_q + LORE_Q) : a_q;
-        int32_t a_t_std = (a_t < 0) ? (a_t + LORE_T) : a_t;
+                /* Constant time reductions to [-Q/2, Q/2] and [-T/2, T/2] */
+                a_q = a_q % LORE_Q;
+                a_q += (a_q >> 31) & LORE_Q;
+                a_q -= ((LORE_Q / 2 - a_q) >> 31) & LORE_Q;
 
-        // This is the core of Garner's algorithm for reconstruction
-        // h = ((a_t - a_q) * q_inv_t) mod t
-        int32_t h = a_t_std - a_q_std;
-        h = h * Q_INV_T;
+                a_t = a_t % LORE_T;
+                a_t += (a_t >> 31) & LORE_T;
+                a_t -= ((LORE_T / 2 - a_t) >> 31) & LORE_T;
 
-        // **** This is the key fix ****
-        // The '%' operator in C can yield a negative result for negative numbers,
-        // so it must be corrected to ensure h is in the range [0, t-1]
-        h = (h % LORE_T + LORE_T) % LORE_T;
+                int32_t h = (a_t - a_q) % LORE_T;
+                h += (h >> 31) & LORE_T;
+                h -= ((LORE_T / 2 - h) >> 31) & LORE_T;
+                // CRT expansion.
+                int32_t val = a_q + LORE_Q * h;
+                val %= TQ;
+                if (val < 0) val += TQ;
+                
+                int32_t d0 = val;
+                if (d0 > TQ_HALF) d0 = TQ - d0; 
+                int32_t d1 = abs(val - TQ_HALF); 
 
-        // Reconstruct the full coefficient: R = a_q + h * q
-        int32_t val = a_q_std + (int32_t)LORE_Q * h;
+                dist_to_0 += d0;
+                dist_to_1 += d1;
+            }
 
-        // Center val to [-TQ/2, TQ/2)
-        if (val > TQ_HALF) {
-            val -= TQ;
-        }
-
-        // Decode using the same logic as the original poly_decode_msg
-        if (abs(val) > TQ_QUARTER) {
-            msg[i / 8] |= (unsigned char)(1 << (i % 8));
+            int32_t diff = dist_to_1 - dist_to_0;
+            uint32_t mask = (uint32_t)(diff >> 31); 
+            msg[i] |= (unsigned char)( (mask & 1) << j );
         }
     }
+
+// ================= Level 2, 3, 4: BCH =================
+#else
+    for (int i = 0; i < decode_bytes * 8; ++i) {
+        int32_t a_q = r_crt->q_poly.coeffs[i];
+        int32_t a_t = r_crt->t_poly.coeffs[i];
+
+        a_q %= LORE_Q;
+        if (a_q > LORE_Q / 2) a_q -= LORE_Q;
+        else if (a_q < -LORE_Q / 2) a_q += LORE_Q;
+
+        a_t %= LORE_T;
+        if (a_t > LORE_T / 2) a_t -= LORE_T;
+        else if (a_t < -LORE_T / 2) a_t += LORE_T;
+
+        int32_t h = a_t - a_q;
+        h %= LORE_T;
+        if (h > LORE_T / 2) h -= LORE_T;
+        else if (h < -LORE_T / 2) h += LORE_T;
+
+        // CRT expansion.
+        int32_t val = a_q + LORE_Q * h;
+        val %= TQ;
+        if (val < 0) val += TQ;
+        
+        int32_t d0 = val;
+        if (d0 > TQ_HALF) d0 = TQ - d0;
+        int32_t d1 = abs(val - TQ_HALF);
+        
+        int32_t diff = d1 - d0;
+        uint32_t mask = (uint32_t)diff >> 31; 
+        recv_codeword[i / 8] |= (unsigned char)(mask << (i % 8));
+    }
+
+    unsigned char *recv_data = recv_codeword;
+    unsigned char *recv_ecc = recv_codeword + LORE_MSG_BYTES;
+    unsigned int errloc[LORE_BCH_T];
+    
+    int num_err = decode_bch(lore_bch_ctx, recv_data, LORE_MSG_BYTES, recv_ecc, NULL, NULL, errloc);
+    if (num_err > 0) {
+        correct_bch(lore_bch_ctx, recv_data, LORE_MSG_BYTES, errloc, num_err);
+    }
+    if (num_err >= 0) {
+        memcpy(msg, recv_data, LORE_MSG_BYTES);
+    } else {
+        memset(msg, 0, LORE_MSG_BYTES);
+    }
+#endif
 }
-
-
 /*************************************************
 * Name:        poly_encode_msg (Algorithm 9)
 *
@@ -565,21 +589,38 @@ void poly_decode_msg_crt(unsigned char *msg, const poly_crt *r_crt) {
 * - const unsigned char *msg: pointer to the input message
 **************************************************/
 void poly_encode_msg(poly *r, const unsigned char *msg) {
-    // Calculate the encoding value based on the paper's formula (tq-1)/2
-    const int32_t val = (LORE_T * LORE_Q - 1) / 2;
+    const int32_t val = (LORE_T * LORE_Q ) / 2; 
+    memset(r->coeffs, 0, sizeof(int16_t) * LORE_N);
 
-    for (int i = 0; i < LORE_N / 8; ++i) {
+#if LORE_LEVEL == 1
+    for (int i = 0; i < LORE_MSG_BYTES; ++i) { 
         for (int j = 0; j < 8; ++j) {
-            uint16_t mask = 1 << j;
-            if (msg[i] & mask) {
-                r->coeffs[8*i+j] = (int16_t)val;
-            } else {
-                r->coeffs[8*i+j] = 0;
+            int bit = (msg[i] & (1 << j)) ? 1 : 0;
+            for (int k = 0; k < LORE_K_VEC; k++) {
+                if (bit) r->coeffs[(i * 8 + j) * LORE_K_VEC + k] = (int16_t)val;
             }
         }
     }
-}
+#else
+    ensure_bch_init();
+    unsigned char ecc[LORE_ECC_BYTES] = {0};
+    unsigned char codeword[LORE_CODEWORD_BYTES] = {0};
 
+    encode_bch(lore_bch_ctx, msg, LORE_MSG_BYTES, ecc);
+    memcpy(codeword, msg, LORE_MSG_BYTES);
+    memcpy(codeword + LORE_MSG_BYTES, ecc, LORE_ECC_BYTES);
+
+    for (int i = 0; i < LORE_CODEWORD_BYTES; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            if (codeword[i] & (1 << j)) {
+                r->coeffs[8 * i + j] = (int16_t)val;
+            }
+        }
+    }
+#endif
+
+
+}
 /*************************************************
 * Name:        poly_decode_msg (Algorithm 11)
 *
@@ -590,23 +631,53 @@ void poly_encode_msg(poly *r, const unsigned char *msg) {
 **************************************************/
 void poly_decode_msg(unsigned char *msg, const poly *r) {
     const int32_t TQ = LORE_T * LORE_Q;
-    const int32_t threshold = TQ / 4;
+    
+    memset(msg, 0, LORE_MSG_BYTES);
 
-    memset(msg, 0, LORE_SYMBYTES);
-
-    for (int i = 0; i < LORE_N; ++i) {
-        // Center the coefficient from [0, TQ-1] to [-TQ/2, TQ/2)
-        int32_t val = r->coeffs[i];
-        if (val > TQ / 2) {
-            val -= TQ;
-        }
-
-        // If the coefficient is closer to 0 than to +/- TQ/2, the bit is 0.
-        // If it is closer to +/- TQ/2, the bit is 1.
-        if (abs(val) > threshold) {
-            msg[i / 8] |= (unsigned char)(1 << (i % 8));
+#if LORE_LEVEL == 1
+    for (int i = 0; i < LORE_MSG_BYTES; ++i) { 
+        for (int j = 0; j < 8; ++j) {
+            int32_t S = 0;
+            for (int k = 0; k < LORE_K_VEC; k++) {
+                int32_t val = r->coeffs[(i * 8 + j) * LORE_K_VEC + k];
+                if (val > TQ / 2) val -= TQ;
+                S += val; 
+            }
+            if (abs(S) >= TQ / 2) { 
+                msg[i] |= (unsigned char)(1 << j);
+            }
         }
     }
+#else
+    const int32_t threshold = TQ / 4;
+    ensure_bch_init();
+    unsigned char recv_codeword[LORE_CODEWORD_BYTES] = {0};
+
+    for (int i = 0; i < LORE_CODEWORD_BYTES; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            int32_t val = r->coeffs[i * 8 + j];
+            if (val > TQ / 2) val -= TQ;
+            if (abs(val) > threshold) {
+                recv_codeword[i] |= (unsigned char)(1 << j);
+            }
+        }
+    }
+
+    unsigned char *recv_data = recv_codeword;
+    unsigned char *recv_ecc = recv_codeword + LORE_MSG_BYTES;
+    unsigned int errloc[LORE_BCH_T];
+    
+    int num_err = decode_bch(lore_bch_ctx, recv_data, LORE_MSG_BYTES, recv_ecc, NULL, NULL, errloc);
+    if (num_err > 0) {
+        correct_bch(lore_bch_ctx, recv_data, LORE_MSG_BYTES, errloc, num_err);
+    }
+    
+    if (num_err >= 0) {
+        memcpy(msg, recv_data, LORE_MSG_BYTES);
+    } else {
+        memset(msg, 0, LORE_MSG_BYTES);
+    }
+#endif
 }
 /*************************************************
 * Name:        poly_add_scaled_msg
@@ -618,38 +689,18 @@ void poly_decode_msg(unsigned char *msg, const poly *r) {
 **************************************************/
 void poly_add_scaled_msg(poly_crt *r, const poly *msg_poly) {
     for(int i = 0; i < LORE_N; ++i) {
-        // --- q-part addition (unchanged) ---
-        r->q_poly.coeffs[i] = barrett_reduce(r->q_poly.coeffs[i] + msg_poly->coeffs[i]);
+        int32_t m_val = msg_poly->coeffs[i]; 
 
-        // --- t-part addition (now highly optimized) ---
-        int16_t t_msg_coeff = msg_poly->coeffs[i] % LORE_T;
-        int32_t t_sum = r->t_poly.coeffs[i] + t_msg_coeff; // Use int32_t for sum
+        // --- q-part addition ---
+        int32_t q_sum = r->q_poly.coeffs[i] + m_val;
+        r->q_poly.coeffs[i] = center_mod_257(q_sum);
 
-#if LORE_LEVEL == 1 || LORE_LEVEL == 2
-        // For t=3 and t=7, use the extremely fast lookup table.
-        // The LORE_MOD_T_SPARSE macro handles both modulo and centering.
-        r->t_poly.coeffs[i] = LORE_MOD_T_SPARSE(t_sum);
-
-#else // LORE_LEVEL == 3 (t=13)
-        // For t=13, use the highly optimized Barrett-like reduction
-        // adapted from poly_sparse_mul_modt function.
-
-        // Pre-calculated "magic number" M = floor(2^35 / 13)
-        const int64_t M = 2643056797;
-
-        // a * M >> 35 is an excellent approximation of a / 13
-        int32_t q = (int32_t)(((int64_t)t_sum * M) >> 35);
-        int16_t reduced_val = (int16_t)(t_sum - q * 13);
-
-        // Correction step 1: Ensure remainder is in the range [0, 12]
-        if (reduced_val >= 13) reduced_val -= 13;
-        if (reduced_val < 0) reduced_val += 13;
-
-        // Correction step 2: Center the result to [-6, 6]
-        if (reduced_val > 6) reduced_val -= 13;
-
-        r->t_poly.coeffs[i] = reduced_val;
-#endif
+        // --- t-part addition ---
+        int16_t t_coeff = (int16_t)((r->t_poly.coeffs[i] + m_val) & (LORE_T - 1));
+        if (LORE_T == 4) {
+            t_coeff -= ((t_coeff >> 1) & (t_coeff & 1)) << 2;
+        }
+        r->t_poly.coeffs[i] = t_coeff;
     }
 }
 
@@ -708,9 +759,9 @@ unsigned int rej_uniform_t(int16_t *r,
 
   while(ctr < len && pos < buflen) {
     if (buf[pos] < t_limit) {
-      int16_t t_coeff = buf[pos] % LORE_T;
-      if (t_coeff > LORE_T / 2) {
-          t_coeff -= LORE_T;
+      int16_t t_coeff = (int16_t)(buf[pos] & (LORE_T - 1));
+      if (LORE_T == 4) {
+          t_coeff -= ((t_coeff >> 1) & (t_coeff & 1)) << 2;
       }
       r[ctr++] = t_coeff;
     }
@@ -728,33 +779,19 @@ unsigned int rej_uniform_t(int16_t *r,
 * - const poly *b: pointer to the second input polynomial
 **************************************************/
 void poly_mul_modt(poly *r, const poly *a, const poly *b) {
-    // Step 1: Use the most efficient Toom-Cook algorithm for the core multiplication
-    // This is an accumulation operation (res += a*b), so we clear the result first
     int16_t res_full[LORE_N];
     memset(res_full, 0, LORE_N * sizeof(int16_t));
-    poly_mul_acc(a->coeffs, b->coeffs, res_full);
+    poly_mul_acc(a->coeffs, b->coeffs, res_full); // Underlying polynomial multiplication.
 
-    // Step 2: Use the most efficient, level-optimized method for mod t reduction
     for (int i = 0; i < LORE_N; i++) {
-        int32_t final_val = res_full[i]; // Use a 32-bit integer to match the input range of the lookup table
-
-#if LORE_LEVEL == 1
-        // Level 1 (mod 3): use the extremely fast lookup table
-        r->coeffs[i] = LORE_MOD_T_SPARSE(final_val);
-#elif LORE_LEVEL == 2
-        // Level 2 (mod 7): use the extremely fast lookup table
-        r->coeffs[i] = LORE_MOD_T_SPARSE(final_val);
-#else
-        // Level 3 (mod 13): use efficient arithmetic operations for centered reduction
-        // (because no lookup table was designed for Level 3)
-        int16_t reduced_val = (int16_t)(final_val % LORE_T);
-        if (reduced_val > LORE_T / 2) {
-            reduced_val -= LORE_T;
-        } else if (reduced_val < -(LORE_T / 2)) {
-            reduced_val += LORE_T;
+        int32_t final_val = res_full[i]; 
+        
+        int16_t val = (int16_t)(final_val & (LORE_T - 1));
+        if (LORE_T == 4) {
+            val -= ((val >> 1) & (val & 1)) << 2;
         }
-        r->coeffs[i] = reduced_val;
-#endif
+        
+        r->coeffs[i] = val;
     }
 }
 
@@ -821,10 +858,9 @@ size_t lore_poly_pack_q_split(unsigned char main_buf[LORE_N], unsigned char *ove
 
     for (int j = 0; j < LORE_N; ++j) {
         int16_t coeff = p->coeffs[j];
-        if (coeff < 0 || coeff >= LORE_Q) {
-           coeff = barrett_reduce(coeff);
-           if(coeff < 0) coeff += LORE_Q;
-        }
+        /* Constant time reduction */
+        coeff = barrett_reduce(coeff);
+        coeff += (coeff >> 15) & LORE_Q;
 
         if (coeff < 255) {
             main_buf[j] = (unsigned char)coeff;
@@ -868,5 +904,27 @@ void lore_poly_unpack_q_split(poly *p, const unsigned char main_buf[LORE_N], con
         } else {
             p->coeffs[j] = byte;
         }
+    }
+}
+
+
+/*************************************************
+* Name:        poly_mul_schoolbook_q
+* Description: Normal domain schoolbook multiplication mod (Q, X^N+1)
+**************************************************/
+void poly_mul_schoolbook_q(poly *r, const poly *a, const poly *b) {
+    int32_t c_tmp[2 * LORE_N] = {0};
+    
+    for (int i = 0; i < LORE_N; i++) {
+        for (int j = 0; j < LORE_N; j++) {
+            c_tmp[i + j] += (int32_t)a->coeffs[i] * b->coeffs[j];
+        }
+    }
+    
+    for (int j = 0; j < LORE_N; j++) {
+        int32_t val = c_tmp[j] - c_tmp[j + LORE_N]; 
+        
+        // Apply 32-bit reduction.
+        r->coeffs[j] = center_mod_257(val);
     }
 }

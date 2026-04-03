@@ -7,11 +7,12 @@ CC = gcc
 LDFLAGS =
 
 # Base compilation flags
-CFLAGS_BASE = -O3 -Wall -Wconversion -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls -Wshadow -Wpointer-arith -fomit-frame-pointer -I.
+CFLAGS_BASE = -O3 -Wall  -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls -Wshadow -Wpointer-arith -fomit-frame-pointer -I.
 # Define separate compilation flags for each security level
 CFLAGS_1 = $(CFLAGS_BASE) -DLORE_LEVEL=1
 CFLAGS_2 = $(CFLAGS_BASE) -DLORE_LEVEL=2
 CFLAGS_3 = $(CFLAGS_BASE) -DLORE_LEVEL=3
+CFLAGS_4 = $(CFLAGS_BASE) -DLORE_LEVEL=4
 
 # Target directory
 OBJDIR = obj
@@ -25,7 +26,7 @@ VPATH = .:test:kat
 
 # Core library source files
 SOURCES_BASE = kem.c pke.c indcpa.c polyvec.c poly.c ntt.c sampler.c reduce.c \
-               symmetric-shake.c fips202.c toomcook.c verify.c
+               symmetric-shake.c fips202.c toomcook.c verify.c bch_codec.c
 
 # Random number source files (distinguished by purpose)
 SOURCES_RANDOM_REAL = randombytes.c
@@ -44,27 +45,33 @@ SOURCES_KAT_MAIN = PQCgenKAT_pke.c
 OBJECTS_BASE_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
 OBJECTS_BASE_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
 OBJECTS_BASE_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
+OBJECTS_BASE_4 = $(addsuffix _4, $(addprefix $(OBJDIR)/, $(SOURCES_BASE:.c=.o)))
+
 
 OBJECTS_RANDOM_REAL_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_REAL:.c=.o)))
 OBJECTS_RANDOM_REAL_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_REAL:.c=.o)))
 OBJECTS_RANDOM_REAL_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_REAL:.c=.o)))
+OBJECTS_RANDOM_REAL_4 = $(addsuffix _4, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_REAL:.c=.o)))
 
 OBJECTS_RANDOM_KAT_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_KAT:.c=.o)))
 OBJECTS_RANDOM_KAT_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_KAT:.c=.o)))
 OBJECTS_RANDOM_KAT_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_KAT:.c=.o)))
+OBJECTS_RANDOM_KAT_4 = $(addsuffix _4, $(addprefix $(OBJDIR)/, $(SOURCES_RANDOM_KAT:.c=.o)))
 
 OBJECTS_TEST_MAIN_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_TEST_MAIN:.c=.o)))
 OBJECTS_TEST_MAIN_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_TEST_MAIN:.c=.o)))
 OBJECTS_TEST_MAIN_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_TEST_MAIN:.c=.o)))
+OBJECTS_TEST_MAIN_4 = $(addsuffix _4, $(addprefix $(OBJDIR)/, $(SOURCES_TEST_MAIN:.c=.o)))
 
 OBJECTS_SPEED_MAIN_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_SPEED_MAIN:.c=.o)))
 OBJECTS_SPEED_MAIN_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_SPEED_MAIN:.c=.o)))
 OBJECTS_SPEED_MAIN_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_SPEED_MAIN:.c=.o)))
+OBJECTS_SPEED_MAIN_4 = $(addsuffix _4, $(addprefix $(OBJDIR)/, $(SOURCES_SPEED_MAIN:.c=.o)))
 
 OBJECTS_KAT_MAIN_1 = $(addsuffix _1, $(addprefix $(OBJDIR)/, $(SOURCES_KAT_MAIN:.c=.o)))
 OBJECTS_KAT_MAIN_2 = $(addsuffix _2, $(addprefix $(OBJDIR)/, $(SOURCES_KAT_MAIN:.c=.o)))
 OBJECTS_KAT_MAIN_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_KAT_MAIN:.c=.o)))
-
+OBJECTS_KAT_MAIN_4 = $(addsuffix _4, $(addprefix $(OBJDIR)/, $(SOURCES_KAT_MAIN:.c=.o)))
 
 # ==============================================================================
 # ===================      Build Rules (Recipes)      ===========================
@@ -74,9 +81,9 @@ OBJECTS_KAT_MAIN_3 = $(addsuffix _3, $(addprefix $(OBJDIR)/, $(SOURCES_KAT_MAIN:
 all: test speed kat
 
 # Define convenience targets for building different types of programs
-test: test_lore_1 test_lore_2 test_lore_3
-speed: test_speed_1 test_speed_2 test_speed_3
-kat: PQCgenKAT_pke_1 PQCgenKAT_pke_2 PQCgenKAT_pke_3
+test: test_lore_1 test_lore_2 test_lore_3 test_lore_4
+speed: test_speed_1 test_speed_2 test_speed_3 test_speed_4
+kat: PQCgenKAT_pke_1 PQCgenKAT_pke_2 PQCgenKAT_pke_3 PQCgenKAT_pke_4
 
 # --- Linking Rules (per level) ---
 
@@ -87,6 +94,9 @@ test_lore_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_REAL_2) $(OBJECTS_TEST_MAIN_2)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_2) $^ -o $@ $(LDFLAGS)
 test_lore_3: $(OBJECTS_BASE_3) $(OBJECTS_RANDOM_REAL_3) $(OBJECTS_TEST_MAIN_3)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_3) $^ -o $@ $(LDFLAGS)
+test_lore_4: $(OBJECTS_BASE_4) $(OBJECTS_RANDOM_REAL_4) $(OBJECTS_TEST_MAIN_4)
+	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_4) $^ -o $@ $(LDFLAGS)
+
 
 # Speed tests also use the REAL randombytes source
 test_speed_1: $(OBJECTS_BASE_1) $(OBJECTS_RANDOM_REAL_1) $(OBJECTS_SPEED_MAIN_1)
@@ -95,6 +105,9 @@ test_speed_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_REAL_2) $(OBJECTS_SPEED_MAIN_2)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_2) $^ -o $@ $(LDFLAGS)
 test_speed_3: $(OBJECTS_BASE_3) $(OBJECTS_RANDOM_REAL_3) $(OBJECTS_SPEED_MAIN_3)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_3) $^ -o $@ $(LDFLAGS)
+test_speed_4: $(OBJECTS_BASE_4) $(OBJECTS_RANDOM_REAL_4) $(OBJECTS_SPEED_MAIN_4)
+	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_4) $^ -o $@ $(LDFLAGS)
+
 
 # KAT generation uses the DETERMINISTIC rng source
 PQCgenKAT_pke_1: $(OBJECTS_BASE_1) $(OBJECTS_RANDOM_KAT_1) $(OBJECTS_KAT_MAIN_1)
@@ -103,6 +116,9 @@ PQCgenKAT_pke_2: $(OBJECTS_BASE_2) $(OBJECTS_RANDOM_KAT_2) $(OBJECTS_KAT_MAIN_2)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_2) $^ -o $@ $(LDFLAGS)
 PQCgenKAT_pke_3: $(OBJECTS_BASE_3) $(OBJECTS_RANDOM_KAT_3) $(OBJECTS_KAT_MAIN_3)
 	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_3) $^ -o $@ $(LDFLAGS)
+PQCgenKAT_pke_4: $(OBJECTS_BASE_4) $(OBJECTS_RANDOM_KAT_4) $(OBJECTS_KAT_MAIN_4)
+	@echo "==> Linking $@ ..." && $(CC) $(CFLAGS_4) $^ -o $@ $(LDFLAGS)
+
 
 # --- Compilation Rules (per level) ---
 
@@ -124,6 +140,10 @@ $(OBJDIR)/%.o_2: %.c | $(OBJDIR)
 $(OBJDIR)/%.o_3: %.c | $(OBJDIR)
 	@echo "Compiling $< (Level 3)..."
 	@$(CC) $(CFLAGS_3) -c $< -o $@
+
+$(OBJDIR)/%.o_4: %.c | $(OBJDIR)
+	@echo "Compiling $< (Level 4)..."
+	@$(CC) $(CFLAGS_4) -c $< -o $@
 
 # --- Clean Rule ---
 clean:

@@ -4,7 +4,7 @@
 #include "ntt.h"
 #include "reduce.h"
 
-
+/* Precomputed zeta values for NTT */
 int16_t zetas[128] = {
        1,   -16,    64,     4,    -8,   128,     2,   -32,
     -121,  -120,   -34,    30,   -60,   -68,    15,    17,
@@ -23,94 +23,149 @@ int16_t zetas[128] = {
     -126,   -40,   -97,    10,   -20,    63,     5,   -80,
       83,   -43,   -85,    75,   107,    87,   -91,   -86,
 };
-/*************************************************
-* Name:        fqmul
-*
-* Description: Multiplication followed by Montgomery reduction
-*
-* Arguments:   - int16_t a: first factor
-*              - int16_t b: second factor
-*
-* Returns 16-bit integer congruent to a*b*R^{-1} mod q
-**************************************************/
+
 int16_t fqmul(int16_t a, int16_t b) {
   return (int16_t)montgomery_reduce((int64_t)a * b);
 }
 
+/* ==================== NTT for N=512 ==================== */
+#if LORE_N == 512
 /*************************************************
-* Name:        ntt
+* Name:        basemul4
 *
-* Description: Inplace number-theoretic transform (NTT) in Rq.
-*              input is in standard order, output is in bitreversed order
+* Description: Multiplication of polynomials in Zq[X]/(X^4-zeta)
+* used for N=512 ring multiplication.
 *
-* Arguments:   - int16_t r[256]: pointer to input/output vector of elements of Zq
+* Arguments:   - int16_t r[4]: pointer to output polynomial
+* - const int16_t a[4]: pointer to first input polynomial
+* - const int16_t b[4]: pointer to second input polynomial
+* - int16_t zeta: zeta coefficient
 **************************************************/
-void ntt(int16_t r[256]) {
-  unsigned int len, start, j, k;
-  int16_t t, zeta;
-
-  k = 1;
-  for(len = 128; len >= 2; len >>= 1) {
-    for(start = 0; start < 256; start = j + len) {
-      zeta = zetas[k++];
-      for(j = start; j < start + len; j++) {
-        t = fqmul(zeta, r[j + len]);
-        r[j + len] = r[j] - t;
-        r[j] = r[j] + t;
-      }
+static void basemul4(int16_t r[4], const int16_t a[4], const int16_t b[4], int16_t zeta) {
+    int32_t c[7] = {0};
+    for(int i=0; i<4; i++) {
+        for(int j=0; j<4; j++) {
+            c[i+j] += (int32_t)fqmul(a[i], b[j]);
+        }
     }
-  }
+    r[0] = (int16_t)(c[0] + fqmul((int16_t)c[4], zeta));
+    r[1] = (int16_t)(c[1] + fqmul((int16_t)c[5], zeta));
+    r[2] = (int16_t)(c[2] + fqmul((int16_t)c[6], zeta));
+    r[3] = (int16_t)c[3];
 }
 
-/*************************************************
-* Name:        invntt_tomont
-*
-* Description: Inplace inverse number-theoretic transform in Rq and
-*              multiplication by Montgomery factor 2^16.
-*              Input is in bitreversed order, output is in standard order
-*
-* Arguments:   - int16_t r[256]: pointer to input/output vector of elements of Zq
-**************************************************/
-void invntt_tomont(int16_t r[256]) {
-  unsigned int start, len, j, k;
-  int16_t t, zeta;
-  const int16_t f = 255; // mont^2/128
-
-  k = 127;
-  for(len = 2; len <= 128; len <<= 1) {
-    for(start = 0; start < 256; start = j + len) {
-      zeta = zetas[k--];
-      for(j = start; j < start + len; j++) {
-        t = r[j];
-        r[j] = barrett_reduce(t + r[j + len]);
-        r[j + len] = r[j + len] - t;
-        r[j + len] = fqmul(zeta, r[j + len]);
-      }
+void ntt(int16_t r[512]) {
+    unsigned int len, start, j, k;
+    int16_t t, zeta;
+    k = 1;
+    for(len = 256; len >= 4; len >>= 1) {
+        for(start = 0; start < 512; start = j + len) {
+            zeta = zetas[k++];
+            for(j = start; j < start + len; j++) {
+                t = fqmul(zeta, r[j + len]);
+                r[j + len] = r[j] - t;
+                r[j] = r[j] + t;
+            }
+        }
     }
-  }
-
-  for(j = 0; j < 256; j++)
-    r[j] = fqmul(r[j], f);
 }
 
+void invntt_tomont(int16_t r[512]) {
+    unsigned int len, start, j, k;
+    int16_t t, zeta;
+    const int16_t f = 255; 
+    k = 127;
+    for(len = 4; len <= 256; len <<= 1) {
+        for(start = 0; start < 512; start = j + len) {
+            zeta = zetas[k--];
+            for(j = start; j < start + len; j++) {
+                t = r[j];
+                r[j] = barrett_reduce(t + r[j + len]);
+                r[j + len] = r[j + len] - t;
+                r[j + len] = fqmul(zeta, r[j + len]);
+            }
+        }
+    }
+    for(j = 0; j < 512; j++) r[j] = fqmul(r[j], f);
+}
+
+void poly_mul_ntt(int16_t r[512], const int16_t a[512], const int16_t b[512]) {
+    for(int i = 0; i < 64; i++) { 
+        int16_t zeta = zetas[64 + i];
+        basemul4(&r[8*i],   &a[8*i],   &b[8*i],   zeta);
+        basemul4(&r[8*i+4], &a[8*i+4], &b[8*i+4], -zeta);
+    }
+}
+
+/* ==================== NTT for N=768 ==================== */
+#elif LORE_N == 768
 /*************************************************
-* Name:        basemul
+* Name:        basemul6
 *
-* Description: Multiplication of polynomials in Zq[X]/(X^2-zeta)
-* used for multiplication of elements in Rq in NTT domain.
+* Description: Multiplication of polynomials in Zq[X]/(X^6-zeta)
+* used for N=768 ring multiplication.
 *
-* Arguments:   - int16_t r[2]: pointer to the output polynomial
-* - const int16_t a[2]: pointer to the first factor
-* - const int16_t b[2]: pointer to the second factor
-* - int16_t zeta: integer defining the reduction polynomial
+* Arguments:   - int16_t r[6]: pointer to output polynomial
+* - const int16_t a[6]: pointer to first input polynomial
+* - const int16_t b[6]: pointer to second input polynomial
+* - int16_t zeta: zeta coefficient
 **************************************************/
-void basemul(int16_t r[2], const int16_t a[2], const int16_t b[2], int16_t zeta)
-{
-  r[0]  = fqmul(a[1], b[1]);
-  r[0]  = fqmul(r[0], zeta);
-  r[0] += fqmul(a[0], b[0]);
-  r[1]  = fqmul(a[0], b[1]);
-  r[1] += fqmul(a[1], b[0]);
+static void basemul6(int16_t r[6], const int16_t a[6], const int16_t b[6], int16_t zeta) {
+    int32_t c[11] = {0}; 
+    for(int i = 0; i < 6; i++) {
+        for(int j = 0; j < 6; j++) {
+            c[i+j] += (int32_t)fqmul(a[i], b[j]);
+        }
+    }
+    r[0] = (int16_t)(c[0] + fqmul((int16_t)c[6], zeta));
+    r[1] = (int16_t)(c[1] + fqmul((int16_t)c[7], zeta));
+    r[2] = (int16_t)(c[2] + fqmul((int16_t)c[8], zeta));
+    r[3] = (int16_t)(c[3] + fqmul((int16_t)c[9], zeta));
+    r[4] = (int16_t)(c[4] + fqmul((int16_t)c[10], zeta));
+    r[5] = (int16_t)c[5];
 }
 
+void ntt(int16_t r[768]) {
+    unsigned int len, start, j, k;
+    int16_t t, zeta;
+    k = 1;
+    for(len = 384; len >= 6; len >>= 1) {
+        for(start = 0; start < 768; start = j + len) {
+            zeta = zetas[k++];
+            for(j = start; j < start + len; j++) {
+                t = fqmul(zeta, r[j + len]);
+                r[j + len] = r[j] - t;
+                r[j] = r[j] + t;
+            }
+        }
+    }
+}
 
+void invntt_tomont(int16_t r[768]) {
+    unsigned int start, len, j, k;
+    int16_t t, zeta;
+    const int16_t f = 255; 
+    k = 127;
+    for(len = 6; len <= 384; len <<= 1) {
+        for(start = 0; start < 768; start = j + len) {
+            zeta = zetas[k--];
+            for(j = start; j < start + len; j++) {
+                t = r[j];
+                r[j] = barrett_reduce(t + r[j + len]);
+                r[j + len] = r[j + len] - t;
+                r[j + len] = fqmul(zeta, r[j + len]);
+            }
+        }
+    }
+    for(j = 0; j < 768; j++) r[j] = fqmul(r[j], f);
+}
+
+void poly_mul_ntt(int16_t r[768], const int16_t a[768], const int16_t b[768]) {
+    for(int i = 0; i < 64; i++) { 
+        int16_t zeta = zetas[64 + i];
+        basemul6(&r[12*i],   &a[12*i],   &b[12*i],   zeta);
+        basemul6(&r[12*i+6], &a[12*i+6], &b[12*i+6], -zeta);
+    }
+}
+
+#endif

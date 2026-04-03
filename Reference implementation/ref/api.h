@@ -4,12 +4,14 @@
 #include "params.h"
 
 // Define algorithm name based on the security level parameter K
-#if   (LORE_K == 2)
+#if   (LORE_LEVEL == 1)
 #define CRYPTO_ALGNAME "LORE-128"
-#elif (LORE_K == 3)
-#define CRYPTO_ALGNAME "LORE-192"
-#elif (LORE_K == 4)
+#elif (LORE_LEVEL == 2)
 #define CRYPTO_ALGNAME "LORE-256"
+#elif (LORE_LEVEL == 3)
+#define CRYPTO_ALGNAME "LORE-384"
+#elif (LORE_LEVEL == 4)
+#define CRYPTO_ALGNAME "LORE-512"
 #endif
 
 // === KEM API ===
