@@ -21,7 +21,6 @@ This repository includes:
 ├── Lore/
 │   ├── Reference implementation/   # C reference implementation
 │   ├── Security estimation/        # Python security and DFR analysis tools
-│   └── Lwe_SummaCrypt-3.pdf        # The principle document for the Lore scheme
 └── README.md
 ```
 
