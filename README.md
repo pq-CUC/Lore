@@ -80,19 +80,16 @@ The `Lore/Security estimation/` directory contains Python scripts for a thorough
 The `Lore_security/` subdirectory contains a lattice security estimator based on SageMath. It can be used to evaluate the scheme's hardness against the best-known primal and dual lattice attacks.
 
 **Example Usage:**
-These scripts assess the security of the defined Lore parameter sets. You can run them within a SageMath environment:
+This script assesses the security of all defined Lore parameter sets (128-bit, 256-bit, 384-bit, and 512-bit). You can run it within a SageMath environment:
 
 ```bash
 # Ensure you are in the Lore/Security estimation/Lore_security/ directory
 
-# For 128-bit security level parameters:
-sage ./my-lwe-tests/test_my_params_crt1.py
-
-# For 192-bit and 256-bit security level parameters:
-sage ./my-lwe-tests/test_my_params_crt2-r.py
+# Run the unified security estimation script for all parameter levels:
+sage ./my-lwe-tests/test_my_params_crt.py
 ```
 
-The scripts will output the estimated classical and quantum security levels in bits for each parameter set.
+The script will output the estimated classical and quantum security levels in bits for each parameter set.
 
 ### DFR Calculation
 
