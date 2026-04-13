@@ -8,6 +8,13 @@
 #include "sampler.h"
 #include "reduce.h"
 
+
+static void secure_clear(void *v, size_t n) {
+    volatile uint8_t *p = (volatile uint8_t *)v;
+    while (n--) *p++ = 0;
+}
+
+
 /*************************************************
 * Name:        pack_pk_ntt
 *
@@ -409,6 +416,9 @@ void indcpa_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned 
 
     pack_pk_ntt(pk, seedA, &b_final);
     pack_sk(sk, s_t_sparse, &s_crt);
+    secure_clear(&s_crt, sizeof(s_crt));
+    secure_clear(s_t_sparse, sizeof(s_t_sparse));
+    secure_clear(buf, sizeof(buf));
 }
 
 /*************************************************
@@ -456,7 +466,7 @@ void indcpa_enc(unsigned char *c,
     /* Generate transpose matrix A^T */
     gen_matrix_ntt(at_ntt, seedA, 1); 
 
-    poly_getnoise(&sp_crt, sp_t_sparse, (unsigned char*)coins, 0);
+    poly_getnoise(&sp_crt, sp_t_sparse, coins, 0);
 
     poly_crt_vec_ntt(&sp_crt);
 
@@ -490,7 +500,11 @@ void indcpa_enc(unsigned char *c,
         }
     }
 
+    #if LORE_LEVEL == 1
     poly_crt_vec_pointwise_acc_montgomery_sparse(&cv_crt, (const poly_crt_vec*)&b_ntt, &sp_crt, sp_t_sparse);
+#else
+    poly_crt_vec_pointwise_acc_montgomery(&cv_crt, (const poly_crt_vec*)&b_ntt, &sp_crt);
+#endif
 
     poly_invntt_tomont(&cv_crt.q_poly);
     for (int i = 0; i < LORE_N; ++i) {
@@ -537,7 +551,8 @@ void indcpa_enc(unsigned char *c,
 
     // Pack the compressed ciphertext components.
     pack_ciphertext_ntt(c, &cu_final, &cv_crt);
-
+    secure_clear(&sp_crt, sizeof(sp_crt));
+    secure_clear(sp_t_sparse, sizeof(sp_t_sparse));
 }
 
 /*************************************************
@@ -570,7 +585,7 @@ void indcpa_dec(unsigned char *m,
     poly_invntt_tomont(&s_dot_cu.q_poly);
 
     for (int i = 0; i < LORE_N; ++i) {
-      s_dot_cu.q_poly.coeffs[i] = montgomery_reduce((int32_t)s_dot_cu.q_poly.coeffs[i]);
+      s_dot_cu.q_poly.coeffs[i] = montgomery_reduce((int64_t)s_dot_cu.q_poly.coeffs[i]);
     }
 
     poly_crt R_crt;

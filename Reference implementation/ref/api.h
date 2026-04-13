@@ -36,10 +36,8 @@ int crypto_kem_dec(unsigned char *ss, const unsigned char *ct, const unsigned ch
 #define CRYPTO_PKE_SECRETKEYBYTES LORE_SECRETKEYBYTES
 #define CRYPTO_PKE_CIPHERTEXTBYTES LORE_INDCPA_BYTES
 
-int crypto_pke_keypair_derand(unsigned char *pk, unsigned char *sk, const unsigned char *coins);
 int crypto_pke_keypair(unsigned char *pk, unsigned char *sk);
 
-int crypto_pke_enc_derand(unsigned char *ct, const unsigned char *m, const unsigned char *pk, const unsigned char *coins);
 int crypto_pke_encrypt(unsigned char *ct, const unsigned char *m, unsigned long long mlen, const unsigned char *pk);
 
 int crypto_pke_decrypt(unsigned char *m, unsigned long long *mlen, const unsigned char *ct, const unsigned char *sk);

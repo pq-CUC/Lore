@@ -8,6 +8,13 @@
 #include "params.h"
 #include "fips202.h"
 
+
+static void secure_clear(void *v, size_t n) {
+    volatile uint8_t *p = (volatile uint8_t *)v;
+    while (n--) *p++ = 0;
+}
+
+
 /*************************************************
 * Name:        hash_h
 *
@@ -107,9 +114,9 @@ int crypto_kem_enc_derand(unsigned char *ct, unsigned char *ss, const unsigned c
     unsigned char kr[2 * LORE_SYMBYTES];
     unsigned char buf[LORE_MSG_BYTES + LORE_SYMBYTES];
 
-    hash_h(buf + LORE_MSG_BYTES, pk, LORE_PUBLICKEYBYTES);
-    memcpy(buf, coins, LORE_MSG_BYTES); 
-    hash_g(kr, buf, LORE_MSG_BYTES + LORE_SYMBYTES);
+    hash_h(buf, coins, LORE_MSG_BYTES); 
+    hash_h(buf + LORE_SYMBYTES, pk, LORE_PUBLICKEYBYTES);
+    hash_g(kr, buf, 2 * LORE_SYMBYTES);
 
     indcpa_enc(ct, coins, pk, kr + LORE_SYMBYTES);
 
@@ -210,7 +217,7 @@ int crypto_kem_dec(unsigned char *ss, const unsigned char *ct, const unsigned ch
     cmov(ss, ss_valid, LORE_SYMBYTES, (unsigned char)(1 - fail));
     cmov(ss, ss_invalid, LORE_SYMBYTES, (unsigned char)fail);
 
-    for(size_t i = 0; i < LORE_MSG_BYTES; i++) mu[i] = 0;
-    for(size_t i = 0; i < 2 * LORE_SYMBYTES; i++) kr[i] = 0;
+    secure_clear(mu, LORE_MSG_BYTES);
+    secure_clear(kr, 2 * LORE_SYMBYTES);
     return 0;
 }

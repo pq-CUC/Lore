@@ -333,7 +333,7 @@ void poly_tobytes(unsigned char *r, const poly *p) {
 * - unsigned char *seed:       pointer to the seed
 * - unsigned char nonce:       a domain-separation nonce
 **************************************************/
-void poly_getnoise(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, unsigned char *seed, unsigned char nonce)
+void poly_getnoise(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, const unsigned char *seed, unsigned char nonce)
 {
   sample_fixed_weight(r_crt_vec, r_sparse_vec, seed, nonce);
 }
@@ -358,9 +358,7 @@ void poly_getnoise_uniform(poly *r, uint16_t t, const unsigned char *seed, unsig
     unsigned int buf_pos = 0; 
 
     // Direct sampling in [-(t-1)/2, (t-1)/2].
-    int16_t max_val = (t - 1) / 2;
-    int16_t min_val = -max_val;
-    uint16_t range = max_val - min_val + 1; // range=1 when t=2; range=3 when t=4.
+    uint16_t range = t;
     uint16_t limit = (uint16_t)((0x100 / range) * range);
 
     while(ctr < LORE_N) {
@@ -368,8 +366,10 @@ void poly_getnoise_uniform(poly *r, uint16_t t, const unsigned char *seed, unsig
         uint8_t val = buf[buf_pos++];
         
         if (val < limit) {
-            // Ensure zero mean.
-            int16_t t_coeff = (int16_t)(val % range) + min_val;
+            int16_t t_coeff = (int16_t)(val % range);
+            if (t == 4) {
+                t_coeff -= ((t_coeff >> 1) & (t_coeff & 1)) << 2;
+            }
             r->coeffs[ctr++] = t_coeff;
         }
     }
@@ -538,18 +538,17 @@ void poly_decode_msg_crt(unsigned char *msg, const poly_crt *r_crt) {
         int32_t a_q = r_crt->q_poly.coeffs[i];
         int32_t a_t = r_crt->t_poly.coeffs[i];
 
-        a_q %= LORE_Q;
-        if (a_q > LORE_Q / 2) a_q -= LORE_Q;
-        else if (a_q < -LORE_Q / 2) a_q += LORE_Q;
+        a_q = a_q % LORE_Q;
+        a_q += (a_q >> 31) & LORE_Q;
+        a_q -= ((LORE_Q / 2 - a_q) >> 31) & LORE_Q;
 
-        a_t %= LORE_T;
-        if (a_t > LORE_T / 2) a_t -= LORE_T;
-        else if (a_t < -LORE_T / 2) a_t += LORE_T;
+        a_t = a_t % LORE_T;
+        a_t += (a_t >> 31) & LORE_T;
+        a_t -= ((LORE_T / 2 - a_t) >> 31) & LORE_T;
 
-        int32_t h = a_t - a_q;
-        h %= LORE_T;
-        if (h > LORE_T / 2) h -= LORE_T;
-        else if (h < -LORE_T / 2) h += LORE_T;
+        int32_t h = (a_t - a_q) % LORE_T;
+        h += (h >> 31) & LORE_T;
+        h -= ((LORE_T / 2 - h) >> 31) & LORE_T;
 
         // CRT expansion.
         int32_t val = a_q + LORE_Q * h;

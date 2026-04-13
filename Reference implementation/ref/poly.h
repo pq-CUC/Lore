@@ -76,7 +76,7 @@ void poly_frombytes(poly *r, const unsigned char *a);
 void poly_tobytes(unsigned char *r, const poly *p);
 
 #define poly_getnoise LORE_NAMESPACE(poly_getnoise)
-void poly_getnoise(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, unsigned char *seed, unsigned char nonce);
+void poly_getnoise(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, const unsigned char *seed, unsigned char nonce);
 
 #define rej_uniform_q LORE_NAMESPACE(rej_uniform_q)
 unsigned int rej_uniform_q(int16_t *r, unsigned int len, const uint8_t *buf, unsigned int buflen);

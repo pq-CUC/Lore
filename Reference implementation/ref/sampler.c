@@ -54,14 +54,15 @@ void sample_fixed_weight(poly_crt_vec *r_crt_vec, poly_sparse *r_sparse_vec, con
             uint16_t choice_idx;
             
             // Rejection sampling loop for unbiased index selection.
-            do {
-                if (buf_pos + 2 > BUF_SIZE) return; // Security check
-                rand_val = (uint16_t)(buf[buf_pos] | ((uint16_t)buf[buf_pos + 1] << 8));
-                buf_pos += 2;
-                m = (uint32_t)rand_val * current_len;
-            } while ((uint16_t)m < current_len); // Rejection condition: lower 16 bits of m < current_len
-
-            choice_idx = (uint16_t)(m >> 16); // Take the upper 16 bits of m as the unbiased result
+            if (buf_pos + 2 > BUF_SIZE) {
+                nonce++; 
+                prf(buf, BUF_SIZE, seed, nonce); 
+                buf_pos = 0;
+            }
+            rand_val = (uint16_t)(buf[buf_pos] | ((uint16_t)buf[buf_pos + 1] << 8));
+            buf_pos += 2;
+            
+            choice_idx = (uint16_t)(((uint32_t)rand_val * current_len) >> 16);
 
 
             uint16_t global_pos = positions[choice_idx];
